@@ -1,0 +1,50 @@
+#!/bin/bash
+# dev-keys — quick-reference keybinding cheat sheet
+
+cat << 'EOF'
+╔══════════════════════════════════════════════════════════╗
+║                    dev keybindings                       ║
+╠══════════════════════════════════════════════════════════╣
+║                                                          ║
+║  NAVIGATION (works across nvim + tmux panes)             ║
+║    Ctrl+h/j/k/l     Move between panes                  ║
+║    Ctrl+a d          Detach session (reattach: dev)      ║
+║                                                          ║
+║  TMUX (prefix = Ctrl+a)                                  ║
+║    Ctrl+a |          Split vertical                      ║
+║    Ctrl+a -          Split horizontal                    ║
+║    Ctrl+a c          New window                          ║
+║    Ctrl+a n/p        Next/prev window                    ║
+║    Ctrl+a H/J/K/L    Resize pane                         ║
+║    Ctrl+a [          Enter copy mode (vi keys)           ║
+║                                                          ║
+║  NEOVIM (leader = Space)                                 ║
+║    Space e           Toggle file tree                    ║
+║    Space ff          Find files (fuzzy)                  ║
+║    Space fg          Search file contents (grep)         ║
+║    Space fb          Find open buffers                   ║
+║    Space fh          Search help tags                    ║
+║                                                          ║
+║  NEOVIM — LSP                                            ║
+║    gd                Go to definition                    ║
+║    gr                Find references                     ║
+║    K                 Hover docs                          ║
+║    Space ca          Code action                         ║
+║    Space rn          Rename symbol                       ║
+║                                                          ║
+║  NEOVIM — Editing                                        ║
+║    V then J/K        Move selected lines up/down         ║
+║    Ctrl+d / Ctrl+u   Scroll half-page (centered)         ║
+║    Esc               Clear search highlight              ║
+║                                                          ║
+║  NEO-TREE (file tree)                                    ║
+║    Enter             Open file                           ║
+║    a                 Add file/directory                   ║
+║    d                 Delete                              ║
+║    r                 Rename                              ║
+║    c / x / p         Copy / cut / paste                  ║
+║    H                 Toggle hidden files                 ║
+║    /                 Filter                              ║
+║                                                          ║
+╚══════════════════════════════════════════════════════════╝
+EOF

@@ -1,0 +1,31 @@
+#!/bin/bash
+# dev — launch terminal IDE workspace
+# Usage: dev [directory]
+
+DIR="${1:-.}"
+cd "$DIR" || exit 1
+DIR="$(pwd)"
+SESSION=$(basename "$DIR" | tr './' '__')
+
+# If session exists, just attach
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+    tmux attach-session -t "$SESSION"
+    exit 0
+fi
+
+# Create session with neovim in top pane
+tmux new-session -d -s "$SESSION" -c "$DIR"
+tmux send-keys -t "$SESSION" "nvim ." Enter
+
+# Bottom-left: Claude Code
+tmux split-window -v -p 35 -t "$SESSION" -c "$DIR"
+tmux send-keys -t "$SESSION" "claude" Enter
+
+# Bottom-right: plain terminal
+tmux split-window -h -p 50 -t "$SESSION" -c "$DIR"
+
+# Focus neovim pane
+tmux select-pane -t "$SESSION":1.0
+
+# Attach
+tmux attach-session -t "$SESSION"
