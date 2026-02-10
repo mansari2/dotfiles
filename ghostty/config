@@ -1,0 +1,52 @@
+# ============================================================
+# Ghostty Terminal Emulator Config
+# ============================================================
+
+# ── Theme ───────────────────────────────────────────────────
+theme = catppuccin-mocha
+
+# ── Font ────────────────────────────────────────────────────
+# Install: brew install --cask font-jetbrains-mono-nerd-font
+font-family = "JetBrains Mono"
+font-size = 13
+font-feature = -calt  # Disable ligatures (or remove to enable)
+
+# ── Window ──────────────────────────────────────────────────
+window-padding-x = 8
+window-padding-y = 8
+window-decoration = true
+macos-titlebar-style = tabs
+
+# ── Clipboard ───────────────────────────────────────────────
+clipboard-read = allow
+clipboard-write = allow
+clipboard-paste-protection = false
+clipboard-paste-bracketed-safe = false
+
+# ── Shell Integration ───────────────────────────────────────
+shell-integration = true
+shell-integration-features = cursor,sudo,title
+
+# ── Performance ─────────────────────────────────────────────
+copy-on-select = false
+
+# ── Keybindings ─────────────────────────────────────────────
+# Use system keybindings (Cmd+C/V work as expected)
+# Custom keybinds (optional):
+# keybind = cmd+t=new_tab
+# keybind = cmd+w=close_surface
+# keybind = cmd+shift+d=new_split:right
+
+# ── Cursor ──────────────────────────────────────────────────
+cursor-style = block
+cursor-style-blink = false
+
+# ── Scrollback ──────────────────────────────────────────────
+scrollback-limit = 10000
+
+# ── Mouse ───────────────────────────────────────────────────
+mouse-hide-while-typing = true
+
+# ── Advanced ────────────────────────────────────────────────
+# Fixes clipboard + tmux integration
+osc-color-report-format = 8-bit

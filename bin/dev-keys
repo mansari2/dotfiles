@@ -1,50 +1,76 @@
 #!/bin/bash
 # dev-keys — quick-reference keybinding cheat sheet
+# Same content as Space+? inside neovim
 
 cat << 'EOF'
-╔══════════════════════════════════════════════════════════╗
-║                    dev keybindings                       ║
-╠══════════════════════════════════════════════════════════╣
-║                                                          ║
-║  NAVIGATION (works across nvim + tmux panes)             ║
-║    Ctrl+h/j/k/l     Move between panes                  ║
-║    Ctrl+a d          Detach session (reattach: dev)      ║
-║                                                          ║
-║  TMUX (prefix = Ctrl+a)                                  ║
-║    Ctrl+a |          Split vertical                      ║
-║    Ctrl+a -          Split horizontal                    ║
-║    Ctrl+a c          New window                          ║
-║    Ctrl+a n/p        Next/prev window                    ║
-║    Ctrl+a H/J/K/L    Resize pane                         ║
-║    Ctrl+a [          Enter copy mode (vi keys)           ║
-║                                                          ║
-║  NEOVIM (leader = Space)                                 ║
-║    Space e           Toggle file tree                    ║
-║    Space ff          Find files (fuzzy)                  ║
-║    Space fg          Search file contents (grep)         ║
-║    Space fb          Find open buffers                   ║
-║    Space fh          Search help tags                    ║
-║                                                          ║
-║  NEOVIM — LSP                                            ║
-║    gd                Go to definition                    ║
-║    gr                Find references                     ║
-║    K                 Hover docs                          ║
-║    Space ca          Code action                         ║
-║    Space rn          Rename symbol                       ║
-║                                                          ║
-║  NEOVIM — Editing                                        ║
-║    V then J/K        Move selected lines up/down         ║
-║    Ctrl+d / Ctrl+u   Scroll half-page (centered)         ║
-║    Esc               Clear search highlight              ║
-║                                                          ║
-║  NEO-TREE (file tree)                                    ║
-║    Enter             Open file                           ║
-║    a                 Add file/directory                   ║
-║    d                 Delete                              ║
-║    r                 Rename                              ║
-║    c / x / p         Copy / cut / paste                  ║
-║    H                 Toggle hidden files                 ║
-║    /                 Filter                              ║
-║                                                          ║
-╚══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║                     DEV IDE MANUAL                          ║
+╠══════════════════════════════════════════════════════════════╣
+║                                                             ║
+║  PANE NAVIGATION (tmux + neovim)                            ║
+║    Ctrl+h/j/k/l      Move between panes                    ║
+║    Ctrl+a d           Detach (reattach with: dev)           ║
+║                                                             ║
+║  TMUX (prefix = Ctrl+a)                                     ║
+║    Ctrl+a |           Vertical split                        ║
+║    Ctrl+a -           Horizontal split                      ║
+║    Ctrl+a c           New window                            ║
+║    Ctrl+a n / p       Next / prev window                    ║
+║    Ctrl+a z           Toggle pane fullscreen                ║
+║    Ctrl+a H/J/K/L     Resize pane                           ║
+║    Ctrl+a [           Copy mode (vi keys, q to exit)        ║
+║                                                             ║
+║  FILE TREE (Space e toggles, tree on the right)             ║
+║    Enter              Open file                             ║
+║    a                  Create file (add / for folder)        ║
+║    d                  Delete                                ║
+║    r                  Rename                                ║
+║    c / x / p          Copy / cut / paste                    ║
+║    m                  Move                                  ║
+║    H                  Toggle hidden files                   ║
+║    /                  Filter / search                       ║
+║                                                             ║
+║  FIND (fuzzy search)                                        ║
+║    Space ff           Find files by name                    ║
+║    Space fg           Search file contents (grep)           ║
+║    Space fb           Switch between open buffers           ║
+║                                                             ║
+║  GIT                                                        ║
+║    Space gg           Open lazygit (full git TUI)           ║
+║    Space gs           Git status (modified files list)      ║
+║    Space gc           Git commit log                        ║
+║    Space gb           Git branches                          ║
+║    Space hb           Toggle git blame on current line      ║
+║    Space hp           Preview hunk diff                     ║
+║    Space hs / hu      Stage / undo stage hunk               ║
+║    Space hr           Reset hunk (discard change)           ║
+║    Space hd           Diff current file                     ║
+║    ] h / [ h          Jump to next / prev changed hunk      ║
+║                                                             ║
+║  CODE (LSP)                                                 ║
+║    gd                 Go to definition                      ║
+║    gr                 Find references                       ║
+║    K                  Hover docs                            ║
+║    Space ca           Code action (quick fix)               ║
+║    Space rn           Rename symbol                         ║
+║                                                             ║
+║  EDITING                                                    ║
+║    i                  Enter insert mode (start typing)      ║
+║    Esc                Back to normal mode                   ║
+║    :w                 Save  |  :q  Quit  |  :wq  Both      ║
+║    u / Ctrl+r         Undo / redo                           ║
+║    V then J/K         Move selected lines up/down           ║
+║    Ctrl+d / Ctrl+u    Scroll half-page (centered)           ║
+║    Space              Press and wait — shows all keybinds   ║
+║                                                             ║
+║  QUICK START                                                ║
+║    1. Space e         Open file tree                        ║
+║    2. Navigate + Enter to open a file                       ║
+║    3. i to edit, Esc then :w to save                        ║
+║    4. Space gg        Review changes in lazygit             ║
+║    5. Ctrl+h          Jump to Claude pane                   ║
+║    6. Ctrl+l          Jump back to editor                   ║
+║                                                             ║
+║  In neovim: Space+? opens this same manual                  ║
+╚══════════════════════════════════════════════════════════════╝
 EOF

@@ -1,0 +1,35 @@
+#!/bin/bash
+# tmux-sessionizer — fuzzy find and switch tmux sessions
+# Bound to Ctrl+a S in tmux
+
+# Check fzf is installed
+if ! command -v fzf &> /dev/null; then
+    echo "fzf not installed. Run: brew install fzf"
+    exit 1
+fi
+
+# Get list of existing sessions
+sessions=$(tmux list-sessions -F "#{session_name}" 2>/dev/null)
+
+# If no sessions exist, exit
+if [ -z "$sessions" ]; then
+    echo "No tmux sessions found"
+    exit 0
+fi
+
+# Use fzf to select a session
+selected=$(echo "$sessions" | fzf --prompt="Switch to session: " --height=40% --reverse)
+
+# If user canceled, exit
+if [ -z "$selected" ]; then
+    exit 0
+fi
+
+# Switch to the selected session
+if [ -n "$TMUX" ]; then
+    # If inside tmux, switch session
+    tmux switch-client -t "$selected"
+else
+    # If outside tmux, attach to session
+    tmux attach-session -t "$selected"
+fi

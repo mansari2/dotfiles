@@ -1,11 +1,86 @@
 #!/bin/bash
 # dev — launch terminal IDE workspace
-# Usage: dev [directory]
 
-DIR="${1:-.}"
+show_help() {
+    cat <<'EOF'
+dev — Terminal IDE with Claude Code
+
+USAGE
+  dev [directory] [options]
+
+OPTIONS
+  -n NAME   Custom session name (default: directory basename)
+  -y        Launch Claude with --dangerously-skip-permissions
+  -l        List all active sessions
+  -h        Show this help
+
+EXAMPLES
+  dev                          Open IDE in current directory
+  dev ~/Developer/phoenix      Open IDE in phoenix
+  dev ~/Developer/phoenix -y   Skip Claude permissions
+  dev ~/project -n work        Session named "work"
+  dev -l                       List sessions
+
+LAYOUT
+  +----------------------+----------------------+
+  |                      |                      |
+  |    Claude Code       |   Neovim (editor +   |
+  |    (50%)             |   file tree right)   |
+  |                      |   (50%)              |
+  |                      +----------------------+
+  |                      |   Terminal (small)   |
+  +----------------------+----------------------+
+
+KEYBINDINGS (inside tmux, prefix = Ctrl+a)
+  Ctrl+h/j/k/l     Move between panes
+  Ctrl+a c          Switch sessions
+  Ctrl+a C          Create new dev session (prompts for path)
+  Ctrl+a d          Detach (reattach with: dev)
+  Ctrl+a z          Toggle pane fullscreen
+  Ctrl+a |          Vertical split
+  Ctrl+a -          Horizontal split
+  Space ?           Open full keybinding cheat sheet (in neovim)
+
+KILL SESSIONS
+  tmux kill-session -t name    Kill a specific session
+  tmux kill-server             Kill all sessions
+EOF
+}
+
+# Help
+if [ "$1" = "-h" ] || [ "$1" = "--help" ] || [ "$1" = "help" ]; then
+    show_help
+    exit 0
+fi
+
+# List sessions
+if [ "$1" = "-l" ] || [ "$1" = "--list" ]; then
+    tmux ls 2>/dev/null || echo "No active sessions."
+    exit 0
+fi
+
+# Parse arguments
+DIR=""
+SESSION_NAME=""
+SKIP_PERMS=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n) SESSION_NAME="$2"; shift 2 ;;
+        -y) SKIP_PERMS="--dangerously-skip-permissions"; shift ;;
+        -*)  echo "Unknown option: $1 (try: dev --help)"; exit 1 ;;
+        *)  DIR="$1"; shift ;;
+    esac
+done
+
+DIR="${DIR:-.}"
 cd "$DIR" || exit 1
 DIR="$(pwd)"
-SESSION=$(basename "$DIR" | tr './' '__')
+
+if [ -n "$SESSION_NAME" ]; then
+    SESSION="$SESSION_NAME"
+else
+    SESSION=$(basename "$DIR" | tr './' '__')
+fi
 
 # If session exists, just attach
 if tmux has-session -t "$SESSION" 2>/dev/null; then
@@ -13,19 +88,23 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
     exit 0
 fi
 
-# Create session with neovim in top pane
+# Create session — left pane: Claude Code
 tmux new-session -d -s "$SESSION" -c "$DIR"
-tmux send-keys -t "$SESSION" "nvim ." Enter
+if [ -n "$SKIP_PERMS" ]; then
+    tmux send-keys -t "$SESSION" "claude $SKIP_PERMS" Enter
+else
+    tmux send-keys -t "$SESSION" "claude" Enter
+fi
 
-# Bottom-left: Claude Code
-tmux split-window -v -p 35 -t "$SESSION" -c "$DIR"
-tmux send-keys -t "$SESSION" "claude" Enter
-
-# Bottom-right: plain terminal
+# Right pane: Neovim (50% width — half the screen)
 tmux split-window -h -p 50 -t "$SESSION" -c "$DIR"
+tmux send-keys -t "$SESSION" "nvim '+Neotree reveal position=right'" Enter
 
-# Focus neovim pane
-tmux select-pane -t "$SESSION":1.0
+# Bottom-right: Terminal (25% of right side height)
+tmux split-window -v -l 25% -t "$SESSION" -c "$DIR"
+
+# Focus neovim pane (pane 1)
+tmux select-pane -t "$SESSION":1.1
 
 # Attach
 tmux attach-session -t "$SESSION"
