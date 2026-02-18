@@ -317,9 +317,12 @@ require("lazy").setup({
     event = "InsertEnter",
     config = function()
       vim.g.codeium_disable_bindings = 1
+      -- Accept: Ctrl+y
       vim.keymap.set("i", "<C-y>", function() return vim.fn["codeium#Accept"]() end, { expr = true, silent = true, desc = "Accept Codeium suggestion" })
-      vim.keymap.set("i", "<M-]>", function() return vim.fn["codeium#CycleCompletions"](1) end, { expr = true, silent = true, desc = "Next Codeium suggestion" })
-      vim.keymap.set("i", "<M-[>", function() return vim.fn["codeium#CycleCompletions"](-1) end, { expr = true, silent = true, desc = "Prev Codeium suggestion" })
+      -- Cycle: Ctrl+j (next) / Ctrl+k (prev)
+      vim.keymap.set("i", "<C-j>", function() return vim.fn["codeium#CycleCompletions"](1) end, { expr = true, silent = true, desc = "Next Codeium suggestion" })
+      vim.keymap.set("i", "<C-k>", function() return vim.fn["codeium#CycleCompletions"](-1) end, { expr = true, silent = true, desc = "Prev Codeium suggestion" })
+      -- Dismiss: Ctrl+e
       vim.keymap.set("i", "<C-e>", function() return vim.fn["codeium#Clear"]() end, { expr = true, silent = true, desc = "Dismiss Codeium suggestion" })
     end,
   },
@@ -557,8 +560,8 @@ vim.keymap.set("n", "<leader>?", function()
     "  AI COMPLETION (Codeium — inline suggestions)        ",
     "  --------------------------------------------------  ",
     "    Ctrl+y             Accept suggestion               ",
-    "    Alt+]              Next suggestion                  ",
-    "    Alt+[              Previous suggestion              ",
+    "    Ctrl+j             Next suggestion                  ",
+    "    Ctrl+k             Previous suggestion              ",
     "    Ctrl+e             Dismiss suggestion               ",
     "                                                      ",
     "  EDITING                                             ",

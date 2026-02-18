@@ -70,8 +70,8 @@ cat << 'EOF'
 ║                                                             ║
 ║  AI COMPLETION (Codeium — inline suggestions)               ║
 ║    Ctrl+y             Accept suggestion                     ║
-║    Alt+]              Next suggestion                       ║
-║    Alt+[              Previous suggestion                   ║
+║    Ctrl+j             Next suggestion                       ║
+║    Ctrl+k             Previous suggestion                   ║
 ║    Ctrl+e             Dismiss suggestion                    ║
 ║                                                             ║
 ║  EDITING                                                    ║
