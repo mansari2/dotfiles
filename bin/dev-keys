@@ -12,10 +12,11 @@ cat << 'EOF'
 ║    Ctrl+a d           Detach (reattach with: dev)           ║
 ║                                                             ║
 ║  TMUX (prefix = Ctrl+a)                                     ║
+║    Ctrl+a c           Switch sessions (arrow keys)          ║
+║    Ctrl+a C           New dev session (prompts for path)    ║
+║    Ctrl+a S           Fuzzy find sessions (fzf)             ║
 ║    Ctrl+a |           Vertical split                        ║
 ║    Ctrl+a -           Horizontal split                      ║
-║    Ctrl+a c           New window                            ║
-║    Ctrl+a n / p       Next / prev window                    ║
 ║    Ctrl+a z           Toggle pane fullscreen                ║
 ║    Ctrl+a H/J/K/L     Resize pane                           ║
 ║    Ctrl+a [           Copy mode (vi keys, q to exit)        ║
@@ -34,6 +35,15 @@ cat << 'EOF'
 ║    Space ff           Find files by name                    ║
 ║    Space fg           Search file contents (grep)           ║
 ║    Space fb           Switch between open buffers           ║
+║    Space fr           Recent files                          ║
+║    Space fs           Document symbols (functions)          ║
+║    Space fS           Workspace symbols                     ║
+║    Space f.           Resume last search                    ║
+║                                                             ║
+║  BUFFERS (open files shown in tab bar)                      ║
+║    Shift+L            Next buffer (tab)                     ║
+║    Shift+H            Previous buffer (tab)                 ║
+║    Space x            Close current buffer                  ║
 ║                                                             ║
 ║  GIT                                                        ║
 ║    Space gg           Open lazygit (full git TUI)           ║
@@ -53,23 +63,44 @@ cat << 'EOF'
 ║    K                  Hover docs                            ║
 ║    Space ca           Code action (quick fix)               ║
 ║    Space rn           Rename symbol                         ║
+║    Space cf           Format file                           ║
+║    Space d            Show diagnostic details               ║
+║    ] d / [ d          Next / prev diagnostic                ║
+║    Space ch           Toggle inlay type hints               ║
+║                                                             ║
+║  AI COMPLETION (Codeium — inline suggestions)               ║
+║    Ctrl+y             Accept suggestion                     ║
+║    Alt+]              Next suggestion                       ║
+║    Alt+[              Previous suggestion                   ║
+║    Ctrl+e             Dismiss suggestion                    ║
 ║                                                             ║
 ║  EDITING                                                    ║
 ║    i                  Enter insert mode (start typing)      ║
 ║    Esc                Back to normal mode                   ║
-║    :w                 Save  |  :q  Quit  |  :wq  Both      ║
+║    Ctrl+s             Save file                             ║
+║    Space w            Save  |  Space x  Close buffer        ║
+║    Space q            Quit neovim                           ║
 ║    u / Ctrl+r         Undo / redo                           ║
 ║    V then J/K         Move selected lines up/down           ║
 ║    Ctrl+d / Ctrl+u    Scroll half-page (centered)           ║
+║    gcc                Toggle line comment                   ║
+║    gc (visual)        Toggle comment on selection           ║
 ║    Space              Press and wait — shows all keybinds   ║
+║                                                             ║
+║  MARKDOWN (in .md files)                                    ║
+║    Space mp           Toggle markdown preview               ║
+║                                                             ║
+║  TIP: Don't use :wq — it exits neovim!                      ║
+║  Use Ctrl+s to save, Space x to close a file.               ║
 ║                                                             ║
 ║  QUICK START                                                ║
 ║    1. Space e         Open file tree                        ║
 ║    2. Navigate + Enter to open a file                       ║
-║    3. i to edit, Esc then :w to save                        ║
-║    4. Space gg        Review changes in lazygit             ║
-║    5. Ctrl+h          Jump to Claude pane                   ║
-║    6. Ctrl+l          Jump back to editor                   ║
+║    3. i to edit, Ctrl+s to save                             ║
+║    4. Shift+L / Shift+H to switch open files                ║
+║    5. Space gg        Review changes in lazygit             ║
+║    6. Ctrl+h          Jump to Claude pane                   ║
+║    7. Ctrl+l          Jump back to editor                   ║
 ║                                                             ║
 ║  In neovim: Space+? opens this same manual                  ║
 ╚══════════════════════════════════════════════════════════════╝

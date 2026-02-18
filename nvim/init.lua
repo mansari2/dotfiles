@@ -33,7 +33,7 @@ vim.opt.swapfile = false
 
 -- ── Bootstrap lazy.nvim ───────────────────────────────────
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
+if not vim.uv.fs_stat(lazypath) then
   vim.fn.system({
     "git", "clone", "--filter=blob:none",
     "https://github.com/folke/lazy.nvim.git",
@@ -55,11 +55,15 @@ require("lazy").setup({
     end,
   },
 
-  -- File tree (right side)
+  -- File tree (right side, loads on first use)
   {
     "nvim-neo-tree/neo-tree.nvim",
     branch = "v3.x",
-    lazy = false,
+    cmd = "Neotree",
+    keys = {
+      { "<leader>e", "<cmd>Neotree toggle position=right<cr>", desc = "Toggle file tree" },
+      { "<leader>E", "<cmd>Neotree reveal<cr>", desc = "Reveal current file in tree" },
+    },
     dependencies = {
       "nvim-lua/plenary.nvim",
       "nvim-tree/nvim-web-devicons",
@@ -89,27 +93,13 @@ require("lazy").setup({
           follow_current_file = { enabled = true },
           filtered_items = { hide_dotfiles = false },
           hijack_netrw_behavior = "open_current",
-          use_libuv_file_watcher = true, -- Auto-refresh on file changes
-        },
-        event_handlers = {
-          -- Auto-refresh when focus returns to neovim
-          {
-            event = "vim_buffer_enter",
-            handler = function()
-              require("neo-tree.sources.manager").refresh("filesystem")
-            end,
-          },
+          use_libuv_file_watcher = true,
         },
       })
-      vim.keymap.set("n", "<leader>e", "<cmd>Neotree toggle position=right<cr>", { desc = "Toggle file tree" })
-      vim.keymap.set("n", "<leader>E", "<cmd>Neotree reveal<cr>", { desc = "Reveal current file in tree" })
-      vim.keymap.set("n", "<leader>r", function()
-        require("neo-tree.sources.manager").refresh("filesystem")
-      end, { desc = "Refresh file tree" })
     end,
   },
 
-  -- Fuzzy finder
+  -- Fuzzy finder (loads on first keypress)
   {
     "nvim-telescope/telescope.nvim",
     branch = "0.1.x",
@@ -117,32 +107,41 @@ require("lazy").setup({
       "nvim-lua/plenary.nvim",
       { "nvim-telescope/telescope-fzf-native.nvim", build = "make" },
     },
+    cmd = "Telescope",
+    keys = {
+      { "<leader>ff", "<cmd>Telescope find_files<cr>", desc = "Find files" },
+      { "<leader>fg", "<cmd>Telescope live_grep<cr>", desc = "Search file contents" },
+      { "<leader>fb", "<cmd>Telescope buffers<cr>", desc = "Find buffers" },
+      { "<leader>fh", "<cmd>Telescope help_tags<cr>", desc = "Help tags" },
+      { "<leader>fr", "<cmd>Telescope oldfiles<cr>", desc = "Recent files" },
+      { "<leader>fs", "<cmd>Telescope lsp_document_symbols<cr>", desc = "Document symbols" },
+      { "<leader>fS", "<cmd>Telescope lsp_workspace_symbols<cr>", desc = "Workspace symbols" },
+      { "<leader>f.", "<cmd>Telescope resume<cr>", desc = "Resume last search" },
+      { "<leader>gs", "<cmd>Telescope git_status<cr>", desc = "Git status" },
+      { "<leader>gc", "<cmd>Telescope git_commits<cr>", desc = "Git commits" },
+      { "<leader>gb", "<cmd>Telescope git_branches<cr>", desc = "Git branches" },
+    },
     config = function()
       local telescope = require("telescope")
       telescope.setup({
         defaults = {
           file_ignore_patterns = { "node_modules", ".git/" },
+          path_display = { "truncate" },
+          layout_config = {
+            horizontal = { preview_width = 0.5 },
+          },
         },
       })
       pcall(telescope.load_extension, "fzf")
-
-      local builtin = require("telescope.builtin")
-      vim.keymap.set("n", "<leader>ff", builtin.find_files, { desc = "Find files" })
-      vim.keymap.set("n", "<leader>fg", builtin.live_grep, { desc = "Search file contents" })
-      vim.keymap.set("n", "<leader>fb", builtin.buffers, { desc = "Find buffers" })
-      vim.keymap.set("n", "<leader>fh", builtin.help_tags, { desc = "Help tags" })
-      -- Git telescope pickers
-      vim.keymap.set("n", "<leader>gs", builtin.git_status, { desc = "Git status" })
-      vim.keymap.set("n", "<leader>gc", builtin.git_commits, { desc = "Git commits" })
-      vim.keymap.set("n", "<leader>gb", builtin.git_branches, { desc = "Git branches" })
     end,
   },
 
   -- Treesitter (parser installer; highlighting is built into nvim 0.11+)
-  -- Install parsers: :TSInstall lua typescript python etc.
+  -- Install parsers manually: :TSInstall python lua etc.
   {
     "nvim-treesitter/nvim-treesitter",
     build = ":TSUpdate",
+    event = { "BufReadPre", "BufNewFile" },
     config = function()
       require("nvim-treesitter").setup({})
     end,
@@ -161,7 +160,6 @@ require("lazy").setup({
         { "<leader>c", group = "Code" },
         { "<leader>h", group = "Hunk" },
         { "<leader>m", group = "Markdown" },
-        { "<leader>i", group = "Inlay" },
       })
     end,
   },
@@ -169,6 +167,7 @@ require("lazy").setup({
   -- Git signs in gutter + inline blame
   {
     "lewis6991/gitsigns.nvim",
+    event = { "BufReadPre", "BufNewFile" },
     config = function()
       require("gitsigns").setup({
         current_line_blame = false,
@@ -206,6 +205,28 @@ require("lazy").setup({
     end,
   },
 
+  -- Buffer tab bar (shows open files at top)
+  {
+    "akinsho/bufferline.nvim",
+    version = "*",
+    dependencies = { "nvim-tree/nvim-web-devicons" },
+    config = function()
+      require("bufferline").setup({
+        options = {
+          mode = "buffers",
+          diagnostics = "nvim_lsp",
+          offsets = {
+            { filetype = "neo-tree", text = "Files", highlight = "Directory", separator = true },
+          },
+          show_buffer_close_icons = false,
+          show_close_icon = false,
+          separator_style = "thin",
+          always_show_bufferline = true,
+        },
+      })
+    end,
+  },
+
   -- Seamless tmux/nvim pane navigation
   {
     "christoomey/vim-tmux-navigator",
@@ -217,12 +238,12 @@ require("lazy").setup({
     "hrsh7th/nvim-cmp",
     event = "InsertEnter",
     dependencies = {
-      "hrsh7th/cmp-nvim-lsp",     -- LSP completions
-      "hrsh7th/cmp-buffer",       -- Buffer completions
-      "hrsh7th/cmp-path",         -- Path completions
-      "L3MON4D3/LuaSnip",         -- Snippet engine
-      "saadparwaiz1/cmp_luasnip", -- Snippet completions
-      "rafamadriz/friendly-snippets", -- Collection of snippets
+      "hrsh7th/cmp-nvim-lsp",
+      "hrsh7th/cmp-buffer",
+      "hrsh7th/cmp-path",
+      "L3MON4D3/LuaSnip",
+      "saadparwaiz1/cmp_luasnip",
+      "rafamadriz/friendly-snippets",
     },
     config = function()
       local cmp = require("cmp")
@@ -262,7 +283,7 @@ require("lazy").setup({
         sources = {
           { name = "nvim_lsp" },
           { name = "luasnip" },
-          { name = "buffer" },
+          { name = "buffer", keyword_length = 3 },
           { name = "path" },
         },
       })
@@ -275,14 +296,13 @@ require("lazy").setup({
     event = "InsertEnter",
     config = function()
       require("nvim-autopairs").setup({})
-      -- Integrate with cmp
       local cmp_autopairs = require("nvim-autopairs.completion.cmp")
       local cmp = require("cmp")
       cmp.event:on("confirm_done", cmp_autopairs.on_confirm_done())
     end,
   },
 
-  -- Surround text objects (add/delete/change surrounding quotes, brackets, etc.)
+  -- Surround text objects
   {
     "kylechui/nvim-surround",
     event = "VeryLazy",
@@ -291,12 +311,16 @@ require("lazy").setup({
     end,
   },
 
-  -- Comment toggling
+  -- AI code completion (Codeium — free inline suggestions)
   {
-    "numToStr/Comment.nvim",
-    event = "VeryLazy",
+    "Exafunction/codeium.vim",
+    event = "InsertEnter",
     config = function()
-      require("Comment").setup()
+      vim.g.codeium_disable_bindings = 1
+      vim.keymap.set("i", "<C-y>", function() return vim.fn["codeium#Accept"]() end, { expr = true, silent = true, desc = "Accept Codeium suggestion" })
+      vim.keymap.set("i", "<M-]>", function() return vim.fn["codeium#CycleCompletions"](1) end, { expr = true, silent = true, desc = "Next Codeium suggestion" })
+      vim.keymap.set("i", "<M-[>", function() return vim.fn["codeium#CycleCompletions"](-1) end, { expr = true, silent = true, desc = "Prev Codeium suggestion" })
+      vim.keymap.set("i", "<C-e>", function() return vim.fn["codeium#Clear"]() end, { expr = true, silent = true, desc = "Dismiss Codeium suggestion" })
     end,
   },
 
@@ -311,17 +335,24 @@ require("lazy").setup({
       vim.keymap.set("n", "<leader>mp", "<cmd>MarkdownPreviewToggle<cr>", { desc = "Toggle Markdown Preview" })
     end,
   },
-
-  -- LSP (provides default server configs for vim.lsp.config)
-  { "neovim/nvim-lspconfig", lazy = true },
 }, {
-  -- lazy.nvim options
   install = { colorscheme = { "catppuccin" } },
   checker = { enabled = false },
 })
 
+-- ── Python settings (PEP 8: 4-space indentation) ─────────
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "python",
+  callback = function()
+    vim.bo.tabstop = 4
+    vim.bo.shiftwidth = 4
+    vim.bo.softtabstop = 4
+    vim.bo.expandtab = true
+    vim.bo.textwidth = 88
+  end,
+})
+
 -- ── LSP (native vim.lsp.config, nvim 0.11+) ──────────────
--- Configure diagnostics display
 vim.diagnostic.config({
   virtual_text = {
     prefix = "●",
@@ -347,8 +378,27 @@ vim.lsp.config("lua_ls", {
   },
 })
 
--- Python LSP config (enhanced for better type hints)
+-- Python LSP: pyright (type checking + completions)
 vim.lsp.config("pyright", {
+  on_init = function(client)
+    -- Auto-detect virtualenv per project root
+    local root = client.root_dir or vim.fn.getcwd()
+    if vim.env.VIRTUAL_ENV then
+      client.settings = vim.tbl_deep_extend("force", client.settings or {}, {
+        python = { pythonPath = vim.env.VIRTUAL_ENV .. "/bin/python" },
+      })
+      return
+    end
+    for _, dir in ipairs({ ".venv", "venv" }) do
+      local path = root .. "/" .. dir .. "/bin/python"
+      if vim.fn.executable(path) == 1 then
+        client.settings = vim.tbl_deep_extend("force", client.settings or {}, {
+          python = { pythonPath = path },
+        })
+        return
+      end
+    end
+  end,
   settings = {
     python = {
       analysis = {
@@ -356,12 +406,23 @@ vim.lsp.config("pyright", {
         autoSearchPaths = true,
         useLibraryCodeForTypes = true,
         diagnosticMode = "workspace",
+        autoImportCompletions = true,
       },
     },
   },
 })
 
-vim.lsp.enable({ "ts_ls", "pyright", "lua_ls" })
+-- Python LSP: ruff (fast linting + formatting, replaces black/isort/flake8)
+vim.lsp.config("ruff", {
+  init_options = {
+    settings = {
+      organizeImports = true,
+      fixAll = true,
+    },
+  },
+})
+
+vim.lsp.enable({ "pyright", "ruff", "lua_ls" })
 
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(ev)
@@ -373,15 +434,29 @@ vim.api.nvim_create_autocmd("LspAttach", {
     vim.keymap.set("n", "K", vim.lsp.buf.hover, opts)
     vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, opts)
     vim.keymap.set("n", "<leader>rn", vim.lsp.buf.rename, opts)
+    vim.keymap.set("n", "<leader>cf", function() vim.lsp.buf.format({ async = true }) end, opts)
     vim.keymap.set("n", "<leader>d", vim.diagnostic.open_float, opts)
-    vim.keymap.set("n", "[d", vim.diagnostic.goto_prev, opts)
-    vim.keymap.set("n", "]d", vim.diagnostic.goto_next, opts)
+    vim.keymap.set("n", "[d", function() vim.diagnostic.jump({ count = -1 }) end, opts)
+    vim.keymap.set("n", "]d", function() vim.diagnostic.jump({ count = 1 }) end, opts)
     -- Inlay hints (show type hints inline for Python)
     if vim.lsp.inlay_hint then
-      vim.keymap.set("n", "<leader>ih", function()
+      vim.keymap.set("n", "<leader>ch", function()
         vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())
       end, { buffer = ev.buf, desc = "Toggle inlay hints" })
     end
+    -- Disable ruff hover in favor of pyright
+    local client = vim.lsp.get_client_by_id(ev.data.client_id)
+    if client and client.name == "ruff" then
+      client.server_capabilities.hoverProvider = false
+    end
+  end,
+})
+
+-- Format Python on save (via ruff)
+vim.api.nvim_create_autocmd("BufWritePre", {
+  pattern = "*.py",
+  callback = function()
+    vim.lsp.buf.format({ async = false })
   end,
 })
 
@@ -443,6 +518,16 @@ vim.keymap.set("n", "<leader>?", function()
     "    Space ff           Find files by name              ",
     "    Space fg           Search file contents (grep)     ",
     "    Space fb           Switch between open buffers     ",
+    "    Space fr           Recent files                    ",
+    "    Space fs           Document symbols (functions)    ",
+    "    Space fS           Workspace symbols               ",
+    "    Space f.           Resume last search              ",
+    "                                                      ",
+    "  BUFFERS (open files shown in tab bar)               ",
+    "  --------------------------------------------------  ",
+    "    Shift+L            Next buffer (tab)               ",
+    "    Shift+H            Previous buffer (tab)           ",
+    "    Space x            Close current buffer            ",
     "                                                      ",
     "  GIT                                                 ",
     "  --------------------------------------------------  ",
@@ -462,8 +547,19 @@ vim.keymap.set("n", "<leader>?", function()
     "    gd                 Go to definition                ",
     "    gr                 Find references                 ",
     "    K                  Hover docs                      ",
-    "    Space ca           Code action (quick fix)         ",
+    "    Space ca           Code action (quick fix/import)  ",
     "    Space rn           Rename symbol                   ",
+    "    Space cf           Format file                     ",
+    "    Space d            Show diagnostic details         ",
+    "    ] d / [ d          Next / prev diagnostic          ",
+    "    Space ch           Toggle inlay type hints         ",
+    "                                                      ",
+    "  AI COMPLETION (Codeium — inline suggestions)        ",
+    "  --------------------------------------------------  ",
+    "    Ctrl+y             Accept suggestion               ",
+    "    Alt+]              Next suggestion                  ",
+    "    Alt+[              Previous suggestion              ",
+    "    Ctrl+e             Dismiss suggestion               ",
     "                                                      ",
     "  EDITING                                             ",
     "  --------------------------------------------------  ",
@@ -483,24 +579,24 @@ vim.keymap.set("n", "<leader>?", function()
     "    ds<char>           Delete surrounding char         ",
     "    cs<old><new>       Change surrounding char         ",
     "                                                      ",
+    "  PYTHON                                              ",
+    "  --------------------------------------------------  ",
+    "    Auto-format on save (ruff)                         ",
+    "    Auto-import via Space ca (code action)             ",
+    "    4-space indentation (PEP 8)                        ",
+    "                                                      ",
     "  MARKDOWN (in .md files)                             ",
     "  --------------------------------------------------  ",
     "    Space mp           Toggle markdown preview         ",
-    "                                                      ",
-    "  PYTHON                                              ",
-    "  --------------------------------------------------  ",
-    "    Space ih           Toggle inlay type hints         ",
-    "    Space d            Show diagnostic details         ",
-    "    ] d / [ d          Next / prev diagnostic          ",
     "                                                      ",
     "  TIP: Don't use :wq  -- it exits neovim!             ",
     "  Use Ctrl+s to save, Space x to close a file.        ",
     "                                                      ",
     "  QUICK START                                         ",
     "  --------------------------------------------------  ",
-    "    1. Space e         Open file tree                  ",
-    "    2. Navigate + Enter to open a file                 ",
-    "    3. i to edit, Ctrl+s to save                       ",
+    "    1. Space ff        Find and open a file            ",
+    "    2. i to edit, Ctrl+s to save                       ",
+    "    3. Shift+L / Shift+H to switch open files          ",
     "    4. Space gg        Review changes in lazygit       ",
     "    5. Ctrl+h          Jump to Claude pane             ",
     "    6. Ctrl+l          Jump back to editor             ",
@@ -533,24 +629,17 @@ vim.keymap.set("n", "<leader>?", function()
 end, { desc = "Open IDE manual" })
 
 -- ── VS Code-friendly save/close keymaps ───────────────────
--- Ctrl+s to save (works in normal and insert mode)
 vim.keymap.set({ "n", "i" }, "<C-s>", "<cmd>w<cr>", { desc = "Save file" })
--- Space w to save
 vim.keymap.set("n", "<leader>w", "<cmd>w<cr>", { desc = "Save file" })
--- Space x to close buffer (NOT neovim — just closes the tab/file)
-vim.keymap.set("n", "<leader>x", "<cmd>bd<cr>", { desc = "Close buffer" })
--- Space q to quit neovim (only when you actually want to exit)
+vim.keymap.set("n", "<leader>x", "<cmd>bd!<cr>", { desc = "Close buffer" })
 vim.keymap.set("n", "<leader>q", "<cmd>qa<cr>", { desc = "Quit neovim" })
 
 -- ── Extra keymaps ─────────────────────────────────────────
--- Clear search highlight
 vim.keymap.set("n", "<Esc>", "<cmd>nohlsearch<cr>")
 
--- Better window navigation (fallback if not in tmux)
-vim.keymap.set("n", "<C-h>", "<C-w>h")
-vim.keymap.set("n", "<C-j>", "<C-w>j")
-vim.keymap.set("n", "<C-k>", "<C-w>k")
-vim.keymap.set("n", "<C-l>", "<C-w>l")
+-- Buffer navigation (Shift+H/L to switch tabs)
+vim.keymap.set("n", "<S-h>", "<cmd>BufferLineCyclePrev<cr>", { desc = "Previous buffer" })
+vim.keymap.set("n", "<S-l>", "<cmd>BufferLineCycleNext<cr>", { desc = "Next buffer" })
 
 -- Move lines up/down in visual mode
 vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv", { desc = "Move line down" })
