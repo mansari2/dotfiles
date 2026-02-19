@@ -90,6 +90,11 @@ fi
 
 # Create session — left pane: Claude Code
 tmux new-session -d -s "$SESSION" -c "$DIR"
+
+# Auto-destroy session when no client is attached (prevents orphaned processes
+# when terminal window is closed). If you need persistent sessions, use plain tmux.
+tmux set-option -t "$SESSION" destroy-unattached on
+
 if [ -n "$SKIP_PERMS" ]; then
     tmux send-keys -t "$SESSION" "claude $SKIP_PERMS" Enter
 else
@@ -105,12 +110,6 @@ tmux split-window -v -l 25% -t "$SESSION" -c "$DIR"
 
 # Focus neovim pane (pane 1)
 tmux select-pane -t "$SESSION":1.1
-
-# Cleanup: kill session when dev script exits (after detach/exit)
-cleanup() {
-    tmux kill-session -t "$SESSION" 2>/dev/null
-}
-trap cleanup EXIT
 
 # Attach
 tmux attach-session -t "$SESSION"
