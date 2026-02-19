@@ -12,6 +12,7 @@ OPTIONS
   -n NAME   Custom session name (default: directory basename)
   -y        Launch Claude with --dangerously-skip-permissions
   -l        List all active sessions
+  -k        Kill all dev sessions (frees memory)
   -h        Show this help
 
 EXAMPLES
@@ -59,6 +60,12 @@ if [ "$1" = "-l" ] || [ "$1" = "--list" ]; then
     exit 0
 fi
 
+# Kill all sessions
+if [ "$1" = "-k" ] || [ "$1" = "--kill" ]; then
+    tmux kill-server 2>/dev/null && echo "All sessions killed." || echo "No sessions running."
+    exit 0
+fi
+
 # Parse arguments
 DIR=""
 SESSION_NAME=""
@@ -90,10 +97,6 @@ fi
 
 # Create session — left pane: Claude Code
 tmux new-session -d -s "$SESSION" -c "$DIR"
-
-# Kill session when last client disconnects (prevents orphaned nvim/claude processes
-# when terminal window is closed). Only fires on detach, not on creation.
-tmux set-hook -t "$SESSION" client-detached "kill-session"
 
 if [ -n "$SKIP_PERMS" ]; then
     tmux send-keys -t "$SESSION" "claude $SKIP_PERMS" Enter
