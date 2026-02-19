@@ -91,9 +91,9 @@ fi
 # Create session — left pane: Claude Code
 tmux new-session -d -s "$SESSION" -c "$DIR"
 
-# Auto-destroy session when no client is attached (prevents orphaned processes
-# when terminal window is closed). If you need persistent sessions, use plain tmux.
-tmux set-option -t "$SESSION" destroy-unattached on
+# Kill session when last client disconnects (prevents orphaned nvim/claude processes
+# when terminal window is closed). Only fires on detach, not on creation.
+tmux set-hook -t "$SESSION" client-detached "kill-session"
 
 if [ -n "$SKIP_PERMS" ]; then
     tmux send-keys -t "$SESSION" "claude $SKIP_PERMS" Enter
