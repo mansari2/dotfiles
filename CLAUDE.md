@@ -30,6 +30,9 @@ The `bin/dev` script:
 3. Right-top pane (50% width, 75% height): runs `nvim '+Neotree reveal position=right'`
 4. Right-bottom pane (25% height): plain shell
 5. Focuses the Neovim pane and attaches
+6. **On exit (Ctrl+a d / detach):** Automatically kills the session and all child processes
+
+This cleanup prevents orphaned nvim/claude processes from consuming memory over time.
 
 Usage: `dev [directory] [-n name] [-y] [-l]`
 
@@ -87,7 +90,7 @@ Usage: `dev [directory] [-n name] [-y] [-l]`
 **Buffers:** `<S-h>` prev buffer, `<S-l>` next buffer, `<leader>x` close buffer
 **Git:** `<leader>gg` lazygit, `<leader>gs/gc/gb` git status/commits/branches, `<leader>h*` hunk actions
 **LSP:** `gd` definition, `gr` references, `K` hover, `<leader>ca` code action, `<leader>rn` rename, `<leader>cf` format
-**AI:** `Ctrl+y` accept Codeium, `Alt+]`/`Alt+[` cycle suggestions, `Ctrl+e` dismiss
+**AI:** `Ctrl+y` accept Codeium, `Ctrl+k`/`Ctrl+j` prev/next suggestions, `Ctrl+e` dismiss
 **Edit:** `Ctrl+s` save, `<leader>w` save, `<leader>q` quit, `gcc` comment (native), `V J/K` move lines
 
 ## Making Changes

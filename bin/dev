@@ -106,5 +106,11 @@ tmux split-window -v -l 25% -t "$SESSION" -c "$DIR"
 # Focus neovim pane (pane 1)
 tmux select-pane -t "$SESSION":1.1
 
+# Cleanup: kill session when dev script exits (after detach/exit)
+cleanup() {
+    tmux kill-session -t "$SESSION" 2>/dev/null
+}
+trap cleanup EXIT
+
 # Attach
 tmux attach-session -t "$SESSION"
