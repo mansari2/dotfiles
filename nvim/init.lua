@@ -406,9 +406,9 @@ vim.lsp.config("pyright", {
     python = {
       analysis = {
         typeCheckingMode = "basic",
-        autoSearchPaths = true,
-        useLibraryCodeForTypes = true,
-        diagnosticMode = "workspace",
+        autoSearchPaths = false,  -- Reduce memory: don't search for all packages
+        useLibraryCodeForTypes = false,  -- Reduce memory: don't analyze library code
+        diagnosticMode = "openFilesOnly",  -- Reduce memory: only check open files, not entire workspace
         autoImportCompletions = true,
       },
     },
