@@ -324,6 +324,18 @@ require("lazy").setup({
       vim.keymap.set("i", "<C-k>", function() return vim.fn["codeium#CycleCompletions"](-1) end, { expr = true, silent = true, desc = "Prev Codeium suggestion" })
       -- Dismiss: Ctrl+e
       vim.keymap.set("i", "<C-e>", function() return vim.fn["codeium#Clear"]() end, { expr = true, silent = true, desc = "Dismiss Codeium suggestion" })
+      -- Toggle: Space ct
+      vim.keymap.set("n", "<leader>ct", function()
+        if vim.g.codeium_enabled == nil or vim.g.codeium_enabled == true then
+          vim.cmd("Codeium Disable")
+          vim.g.codeium_enabled = false
+          vim.notify("Codeium disabled", vim.log.levels.INFO)
+        else
+          vim.cmd("Codeium Enable")
+          vim.g.codeium_enabled = true
+          vim.notify("Codeium enabled", vim.log.levels.INFO)
+        end
+      end, { desc = "Toggle Codeium AI completion" })
     end,
   },
 
@@ -425,7 +437,27 @@ vim.lsp.config("ruff", {
   },
 })
 
-vim.lsp.enable({ "pyright", "ruff", "lua_ls" })
+-- TypeScript/JavaScript LSP
+vim.lsp.config("ts_ls", {
+  settings = {
+    typescript = {
+      inlayHints = {
+        includeInlayParameterNameHints = "all",
+        includeInlayFunctionParameterTypeHints = true,
+        includeInlayVariableTypeHints = true,
+      },
+    },
+    javascript = {
+      inlayHints = {
+        includeInlayParameterNameHints = "all",
+        includeInlayFunctionParameterTypeHints = true,
+        includeInlayVariableTypeHints = true,
+      },
+    },
+  },
+})
+
+vim.lsp.enable({ "pyright", "ruff", "lua_ls", "ts_ls" })
 
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(ev)
@@ -563,6 +595,7 @@ vim.keymap.set("n", "<leader>?", function()
     "    Ctrl+j             Next suggestion                  ",
     "    Ctrl+k             Previous suggestion              ",
     "    Ctrl+e             Dismiss suggestion               ",
+    "    Space ct           Toggle Codeium on/off            ",
     "                                                      ",
     "  EDITING                                             ",
     "  --------------------------------------------------  ",
@@ -574,6 +607,7 @@ vim.keymap.set("n", "<leader>?", function()
     "    Space q            Quit neovim                     ",
     "    u / Ctrl+r         Undo / redo                     ",
     "    V then J/K         Move lines up/down              ",
+    "    V then Tab/S-Tab   Indent/dedent selection          ",
     "    Ctrl+d / Ctrl+u    Half-page scroll                ",
     "    gcc                Toggle line comment             ",
     "    gc (visual)        Toggle comment on selection     ",
@@ -647,6 +681,10 @@ vim.keymap.set("n", "<S-l>", "<cmd>BufferLineCycleNext<cr>", { desc = "Next buff
 -- Move lines up/down in visual mode
 vim.keymap.set("v", "J", ":m '>+1<CR>gv=gv", { desc = "Move line down" })
 vim.keymap.set("v", "K", ":m '<-2<CR>gv=gv", { desc = "Move line up" })
+
+-- Indent/dedent in visual mode with Tab/Shift-Tab (keeps selection)
+vim.keymap.set("v", "<Tab>", ">gv", { desc = "Indent selection" })
+vim.keymap.set("v", "<S-Tab>", "<gv", { desc = "Dedent selection" })
 
 -- Stay centered when scrolling
 vim.keymap.set("n", "<C-d>", "<C-d>zz")
