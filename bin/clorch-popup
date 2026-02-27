@@ -1,11 +1,5 @@
 #!/bin/bash
-# Clorch dashboard with keybinding footer
+# Clorch dashboard — wrapper for enhanced visibility
 
-# Run clorch with LESS pager to enable footer
-CLORCH_PAGER="less -R +G" clorch
-
-# Show keybinding hints in bright text at bottom
-printf '\n'
-printf '\033[38;5;117m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-printf '\033[38;5;117m%s\033[0m\n' " q/Esc: Close  │  j/k/↑/↓: Navigate  │  y/n: Approve/Deny  │  s: Sound  │  t: Jump to Window  │  ?: Help"
-printf '\033[38;5;117m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Run clorch in full window mode (no popup dimming)
+clorch
