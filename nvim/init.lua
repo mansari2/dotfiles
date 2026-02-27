@@ -518,9 +518,9 @@ vim.keymap.set("n", "<leader>gg", function()
   vim.cmd("startinsert")
 end, { desc = "Open lazygit" })
 
--- ── Clorch (Claude session dashboard popup) ──────────────
+-- ── Clorch (Claude session dashboard) ─────────────────────
 vim.keymap.set("n", "<leader>cl", function()
-  vim.fn.system("tmux display-popup -E -w 90% -h 85% 'clorch'")
+  vim.fn.system("tmux new-window -n clorch clorch")
 end, { desc = "Open clorch Claude dashboard" })
 
 -- ── Built-in manual (floating window) ─────────────────────
