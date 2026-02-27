@@ -142,7 +142,7 @@ diff -ruN --ex clorch/terminal/detect.py /Users/azeemansarils/.local/pipx/venvs/
  
 diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py
 --- clorch/tui/app.py	2026-02-27 08:59:30
-+++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 09:41:44
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 09:44:03
 @@ -170,6 +170,7 @@
          Binding("k", "cursor_up", "Up", show=False),
          Binding("right", "jump_to_agent", "Jump", show=False),
@@ -257,13 +257,16 @@ diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/l
              self.notify(f"{name}: no PID — restart session", severity="warning")
          else:
              self.notify(f"No tab found for {name}", severity="warning")
-@@ -957,11 +1011,65 @@
+@@ -957,11 +1011,58 @@
              self.query_one("#detail-panel", AgentDetail).show_agent(None)
  
      def action_jump_to_agent(self) -> None:
 -        """Jump to the selected agent's tmux window."""
-+        """Jump to the selected agent's terminal."""
-+        import subprocess
++        """Jump to the selected agent's terminal.
++
++        Writes a jump script to /tmp/clorch-jump.sh and exits.
++        The tmux binding executes it after the popup closes.
++        """
          table = self.query_one("#session-list", SessionList)
          agent = table.get_selected_agent()
 -        if agent:
@@ -271,57 +274,47 @@ diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/l
 +        if not agent:
 +            return
 +
++        import os
 +        name = agent.project_name or agent.session_id[:12]
 +        from clorch.tui.widgets.session_list import _agent_terminal_group
 +        terminal = _agent_terminal_group(agent)
 +
-+        # For tmux agents: switch session and exit popup
++        jump_script = "/tmp/clorch-jump.sh"
++
++        # For tmux agents: switch tmux session
 +        if agent.tmux_window or terminal == "tmux":
-+            import os
 +            session_name = os.path.basename(agent.cwd).replace(".", "_").replace("/", "_") if agent.cwd else name
-+            # Schedule the switch to happen after clorch exits (so popup closes first)
-+            subprocess.Popen(
-+                ["bash", "-c", f"sleep 0.3 && /opt/homebrew/bin/tmux switch-client -t {session_name} 2>/dev/null"],
-+            )
++            with open(jump_script, "w") as f:
++                f.write(f'#!/bin/bash\n/opt/homebrew/bin/tmux switch-client -t "{session_name}" 2>/dev/null\n')
 +            self.exit()
 +            return
 +
-+        # For iTerm agents: schedule tab activation after popup closes
++        # For iTerm/other terminal agents: activate the right tab
 +        if terminal and terminal != "tmux":
-+            # Find which search term works
-+            search_terms = ["claude", "Claude", name]
-+            if agent.cwd:
-+                import os
-+                search_terms.insert(0, os.path.basename(agent.cwd))
++            with open(jump_script, "w") as f:
++                f.write(f'''#!/bin/bash
++osascript <<'APPLESCRIPT'
++tell application "iTerm2"
++    repeat with w in windows
++        repeat with t in tabs of w
++            try
++                set tabName to name of current session of t
++                if tabName contains "claude" or tabName contains "Claude" then
++                    select t
++                    tell w to select
++                    tell application "System Events" to tell process "iTerm2" to set frontmost to true
++                    return
++                end if
++            end try
++        end repeat
++    end repeat
++end tell
++APPLESCRIPT
++''')
++            self.exit()
++            return
 +
-+            for term in search_terms:
-+                # Schedule AppleScript after popup closes
-+                script = f'''
-+                    sleep 0.3
-+                    osascript -e 'tell application "iTerm2"
-+                        set targetName to "{term}"
-+                        set lowerTarget to do shell script "echo " & quoted form of targetName & " | tr '"'"'[:upper:]'"'"' '"'"'[:lower:]'"'"'"
-+                        repeat with w in windows
-+                            repeat with t in tabs of w
-+                                try
-+                                    set tabName to name of current session of t
-+                                    set lowerTab to do shell script "echo " & quoted form of tabName & " | tr '"'"'[:upper:]'"'"' '"'"'[:lower:]'"'"'"
-+                                    if lowerTab contains lowerTarget then
-+                                        select t
-+                                        tell w to select
-+                                        tell application "System Events" to tell process "iTerm2" to set frontmost to true
-+                                        return "found"
-+                                    end if
-+                                end try
-+                            end repeat
-+                        end repeat
-+                    end tell'
-+                '''
-+                subprocess.Popen(["bash", "-c", script])
-+                self.exit()
-+                return
-+
-+        # Default: just try the normal jump
++        # No jump target — use normal jump
 +        self._jump_to_session(agent)
  
      def action_refresh(self) -> None:
