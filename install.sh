@@ -41,6 +41,7 @@ PACKAGES=(
     fd
     fzf
     lazygit
+    terminal-notifier
 )
 
 for pkg in "${PACKAGES[@]}"; do
