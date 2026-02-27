@@ -158,6 +158,7 @@ require("lazy").setup({
         { "<leader>f", group = "Find" },
         { "<leader>g", group = "Git" },
         { "<leader>c", group = "Code" },
+        { "<leader>cl", desc = "Claude dashboard (clorch)" },
         { "<leader>h", group = "Hunk" },
         { "<leader>m", group = "Markdown" },
       })
@@ -517,6 +518,11 @@ vim.keymap.set("n", "<leader>gg", function()
   vim.cmd("startinsert")
 end, { desc = "Open lazygit" })
 
+-- ── Clorch (Claude session dashboard popup) ──────────────
+vim.keymap.set("n", "<leader>cl", function()
+  vim.fn.system("tmux display-popup -E -w 90% -h 85% 'clorch'")
+end, { desc = "Open clorch Claude dashboard" })
+
 -- ── Built-in manual (floating window) ─────────────────────
 vim.keymap.set("n", "<leader>?", function()
   local lines = {
@@ -588,6 +594,11 @@ vim.keymap.set("n", "<leader>?", function()
     "    Space d            Show diagnostic details         ",
     "    ] d / [ d          Next / prev diagnostic          ",
     "    Space ch           Toggle inlay type hints         ",
+    "                                                      ",
+    "  CLAUDE SESSIONS (clorch dashboard)                 ",
+    "  --------------------------------------------------  ",
+    "    Ctrl+a b           Open clorch popup (any pane)   ",
+    "    Space cl           Open clorch from neovim        ",
     "                                                      ",
     "  AI COMPLETION (Codeium — inline suggestions)        ",
     "  --------------------------------------------------  ",

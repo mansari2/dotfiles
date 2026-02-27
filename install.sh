@@ -156,7 +156,20 @@ else
     success "lua-language-server already installed"
 fi
 
-# ── 7. Bootstrap neovim plugins ────────────────────────────
+# ── 7. Install clorch (Claude session dashboard) ─────────
+info "Installing clorch..."
+if command -v clorch &> /dev/null; then
+    success "clorch already installed"
+else
+    pip3 install git+https://github.com/androsovm/clorch.git
+    success "clorch installed"
+fi
+
+info "Initializing clorch hooks..."
+clorch init
+success "clorch hooks initialized"
+
+# ── 8. Bootstrap neovim plugins ────────────────────────────
 info "Neovim will auto-install plugins on first launch (lazy.nvim)"
 success "Plugins will be installed when you first run nvim"
 
