@@ -114,6 +114,10 @@ ln -sf "$DOTFILES_DIR/bin/tmux-sessionizer" ~/.local/bin/tmux-sessionizer
 chmod +x ~/.local/bin/tmux-sessionizer
 success "tmux-sessionizer symlinked"
 
+ln -sf "$DOTFILES_DIR/bin/clorch-popup" ~/.local/bin/clorch-popup
+chmod +x ~/.local/bin/clorch-popup
+success "clorch-popup wrapper symlinked"
+
 # ── 5. Ensure ~/.local/bin is in PATH ──────────────────────
 SHELL_RC="$HOME/.zshrc"
 if ! grep -q 'export PATH="$HOME/.local/bin:$PATH"' "$SHELL_RC" 2>/dev/null; then

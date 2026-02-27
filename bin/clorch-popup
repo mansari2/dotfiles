@@ -1,0 +1,19 @@
+#!/bin/bash
+# Clorch dashboard wrapper with catppuccin mocha theming
+
+# Catppuccin Mocha colors
+SURFACE0="#313244"      # Dark background
+TEXT="#cdd6f4"          # Light foreground
+BLUE="#89b4fa"          # Accent color
+ROSEWATER="#f5e0dc"     # Subtle highlight
+
+# Create a temporary script that adds footer help text
+HELP_TEXT="
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ q / Esc: Close dashboard  │  ↑/↓ or j/k: Navigate  │  y/n: Approve/Deny  │  s: Toggle Sound
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"
+
+# Run clorch with improved terminal settings
+clorch "$@"
+printf "%b\n" "$HELP_TEXT"
