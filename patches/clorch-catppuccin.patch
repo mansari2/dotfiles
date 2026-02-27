@@ -142,7 +142,7 @@ diff -ruN --ex clorch/terminal/detect.py /Users/azeemansarils/.local/pipx/venvs/
  
 diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py
 --- clorch/tui/app.py	2026-02-27 08:59:30
-+++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 09:28:21
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 09:33:57
 @@ -170,6 +170,7 @@
          Binding("k", "cursor_up", "Up", show=False),
          Binding("right", "jump_to_agent", "Jump", show=False),
@@ -220,7 +220,7 @@ diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/l
 +                    # No iTerm tab has tmux — open a new iTerm window and attach
 +                    attach_script = f'''
 +                        tell application "iTerm2"
-+                            create window with default profile command "tmux attach-session -t {session_name}"
++                            create window with default profile command "/opt/homebrew/bin/tmux attach-session -t {session_name}"
 +                            activate
 +                        end tell
 +                    '''
