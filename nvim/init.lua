@@ -520,7 +520,7 @@ end, { desc = "Open lazygit" })
 
 -- ── Clorch (Claude session dashboard) ─────────────────────
 vim.keymap.set("n", "<leader>cl", function()
-  vim.fn.system("tmux new-window -n clorch clorch")
+  vim.fn.system("tmux display-popup -E -w 90% -h 85% 'clorch'")
 end, { desc = "Open clorch Claude dashboard" })
 
 -- ── Built-in manual (floating window) ─────────────────────
