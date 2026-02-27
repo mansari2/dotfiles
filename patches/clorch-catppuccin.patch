@@ -73,12 +73,13 @@ diff -ruN --ex clorch/hooks/event_handler.sh /Users/azeemansarils/.local/pipx/ve
  # Detect tmux window AND pane ONLY if Claude Code's tty is actually inside a tmux pane.
 diff -ruN --ex clorch/notifications/macos.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/notifications/macos.py
 --- clorch/notifications/macos.py	2026-02-27 08:59:30
-+++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/notifications/macos.py	2026-02-27 08:58:24
-@@ -1,18 +1,39 @@
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/notifications/macos.py	2026-02-27 09:21:21
+@@ -1,18 +1,42 @@
 -"""macOS native notifications via osascript."""
 +"""macOS native notifications via terminal-notifier (with iTerm activation)."""
  from __future__ import annotations
  
++import os
 +import shutil
  import subprocess
  import sys
@@ -97,10 +98,12 @@ diff -ruN --ex clorch/notifications/macos.py /Users/azeemansarils/.local/pipx/ve
          return False
  
 +    # Prefer terminal-notifier — clicking the notification activates iTerm
-+    if shutil.which("terminal-notifier"):
++    # Use full path since hooks/subprocesses may not inherit user's PATH
++    tn = shutil.which("terminal-notifier") or "/opt/homebrew/bin/terminal-notifier"
++    if os.path.isfile(tn):
 +        try:
 +            cmd = [
-+                "terminal-notifier",
++                tn,
 +                "-title", title,
 +                "-message", message,
 +                "-sound", sound,
@@ -116,7 +119,7 @@ diff -ruN --ex clorch/notifications/macos.py /Users/azeemansarils/.local/pipx/ve
      script = (
          f'display notification "{_escape(message)}" '
          f'with title "{_escape(title)}" '
-@@ -46,7 +67,6 @@
+@@ -46,7 +70,6 @@
  
  def notify_question(project: str, message: str) -> bool:
      """Notify about a question/elicitation."""
