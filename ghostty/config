@@ -3,7 +3,7 @@
 # ============================================================
 
 # ── Theme ───────────────────────────────────────────────────
-theme = catppuccin-mocha
+theme = Catppuccin Mocha
 
 # ── Font ────────────────────────────────────────────────────
 # Install: brew install --cask font-jetbrains-mono-nerd-font
@@ -24,7 +24,7 @@ clipboard-paste-protection = false
 clipboard-paste-bracketed-safe = false
 
 # ── Shell Integration ───────────────────────────────────────
-shell-integration = true
+shell-integration = zsh
 shell-integration-features = cursor,sudo,title
 
 # ── Performance ─────────────────────────────────────────────
