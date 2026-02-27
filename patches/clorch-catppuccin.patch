@@ -142,7 +142,7 @@ diff -ruN --ex clorch/terminal/detect.py /Users/azeemansarils/.local/pipx/venvs/
  
 diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py
 --- clorch/tui/app.py	2026-02-27 08:59:30
-+++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 09:33:57
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 09:39:53
 @@ -170,6 +170,7 @@
          Binding("k", "cursor_up", "Up", show=False),
          Binding("right", "jump_to_agent", "Jump", show=False),
@@ -257,6 +257,21 @@ diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/l
              self.notify(f"{name}: no PID — restart session", severity="warning")
          else:
              self.notify(f"No tab found for {name}", severity="warning")
+@@ -957,11 +1011,13 @@
+             self.query_one("#detail-panel", AgentDetail).show_agent(None)
+ 
+     def action_jump_to_agent(self) -> None:
+-        """Jump to the selected agent's tmux window."""
++        """Jump to the selected agent's terminal. Exits clorch so the popup closes."""
+         table = self.query_one("#session-list", SessionList)
+         agent = table.get_selected_agent()
+         if agent:
+             self._jump_to_session(agent)
++            # Exit clorch so the tmux popup closes and the jump is visible
++            self.exit()
+ 
+     def action_refresh(self) -> None:
+         self._poll_state()
 diff -ruN --ex clorch/tui/app.tcss /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.tcss
 --- clorch/tui/app.tcss	2026-02-27 08:59:30
 +++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.tcss	2026-02-27 08:31:11
