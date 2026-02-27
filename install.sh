@@ -158,10 +158,18 @@ fi
 
 # ── 7. Install clorch (Claude session dashboard) ─────────
 info "Installing clorch..."
+
+# Ensure pipx is available (for Python apps in isolated environments)
+if ! command -v pipx &> /dev/null; then
+    info "Installing pipx..."
+    brew install pipx
+    success "pipx installed"
+fi
+
 if command -v clorch &> /dev/null; then
     success "clorch already installed"
 else
-    pip3 install git+https://github.com/androsovm/clorch.git
+    pipx install git+https://github.com/androsovm/clorch.git
     success "clorch installed"
 fi
 
