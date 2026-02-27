@@ -1,19 +1,19 @@
 #!/bin/bash
-# Clorch dashboard wrapper with catppuccin mocha theming
+# Clorch dashboard wrapper with keybinding hints
 
-# Catppuccin Mocha colors
-SURFACE0="#313244"      # Dark background
-TEXT="#cdd6f4"          # Light foreground
-BLUE="#89b4fa"          # Accent color
-ROSEWATER="#f5e0dc"     # Subtle highlight
+# Create a temp script that runs clorch and shows help
+TMPFILE=$(mktemp)
+trap "rm -f $TMPFILE" EXIT
 
-# Create a temporary script that adds footer help text
-HELP_TEXT="
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- q / Esc: Close dashboard  │  ↑/↓ or j/k: Navigate  │  y/n: Approve/Deny  │  s: Toggle Sound
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-"
+cat > "$TMPFILE" << 'SCRIPT'
+# Run clorch
+clorch
 
-# Run clorch with improved terminal settings
-clorch "$@"
-printf "%b\n" "$HELP_TEXT"
+# Show keybinding hints at bottom
+printf '\n'
+printf '\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+printf '\033[38;5;245m%s\033[0m\n' " q / Esc: Close  │  j/k or ↑↓: Navigate  │  y/n: Approve/Deny  │  s: Sound  │  t: Jump"
+printf '\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+SCRIPT
+
+bash "$TMPFILE"
