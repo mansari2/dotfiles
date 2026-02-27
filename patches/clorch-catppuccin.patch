@@ -710,29 +710,30 @@ diff -ruN --ex clorch/tui/widgets/session_list.py /Users/azeemansarils/.local/pi
          for v in recent:
 diff -ruN --ex clorch/tui/widgets/settings_panel.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/settings_panel.py
 --- clorch/tui/widgets/settings_panel.py	2026-02-27 08:59:30
-+++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/settings_panel.py	2026-02-27 08:54:05
-@@ -60,17 +60,19 @@
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/settings_panel.py	2026-02-27 09:14:28
+@@ -60,17 +60,18 @@
          if self._sound_enabled:
              text.append("ON", style=f"bold {GREEN}")
          else:
 -            text.append("OFF", style=f"dim {GREY}")
 +            text.append("OFF", style=f"{GREY}")
  
-         # Line 2: YOLO — always red background (danger zone)
+-        # Line 2: YOLO — always red background (danger zone)
++        # Line 2: YOLO — auto-approve for tmux agents only
          text.append("\n")
          if self._yolo_enabled:
              text.append("[!] \u26a0 YOLO ARMED \u26a0 ", style=f"bold white on {RED}")
++            text.append(" tmux agents only", style=f"{GREY}")
              if self._rules_count > 0:
 -                text.append(f" ({self._rules_count} deny rules)", style=f"dim {GREY}")
 +                text.append(f" ({self._rules_count} deny rules)", style=f"{GREY}")
          else:
 -            text.append("[!] YOLO OFF ", style=f"bold {GREY} on {DIM}")
+-            if self._rules_count > 0:
+-                text.append(f" ({self._rules_count} rules)", style=f"dim {GREY}")
 +            text.append("[!]", style=f"bold {CYAN}")
 +            text.append(" YOLO ", style="white")
 +            text.append("OFF", style=f"{GREY}")
-             if self._rules_count > 0:
--                text.append(f" ({self._rules_count} rules)", style=f"dim {GREY}")
-+                text.append(f" ({self._rules_count} rules)", style=f"{GREY}")
  
          self.update(text)
 diff -ruN --ex clorch/tui/widgets/status_bar.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/status_bar.py
