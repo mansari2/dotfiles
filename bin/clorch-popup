@@ -1,19 +1,9 @@
 #!/bin/bash
-# Clorch dashboard wrapper with keybinding hints
+# Clorch dashboard — keybinding hints shown at bottom
 
-# Create a temp script that runs clorch and shows help
-TMPFILE=$(mktemp)
-trap "rm -f $TMPFILE" EXIT
-
-cat > "$TMPFILE" << 'SCRIPT'
-# Run clorch
 clorch
 
-# Show keybinding hints at bottom
-printf '\n'
-printf '\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-printf '\033[38;5;245m%s\033[0m\n' " q / Esc: Close  │  j/k or ↑↓: Navigate  │  y/n: Approve/Deny  │  s: Sound  │  t: Jump"
-printf '\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-SCRIPT
-
-bash "$TMPFILE"
+# Show help footer
+printf '\n\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+printf '\033[38;5;245m%s\033[0m\n' " q/Esc: Close │ j/k: Navigate │ y/n: Approve/Deny │ s: Sound │ t: Jump"
+printf '\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
