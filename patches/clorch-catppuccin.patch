@@ -1,0 +1,2470 @@
+--- /tmp/clorch/src/clorch/constants.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/constants.py	2026-02-27 08:28:37
+@@ -0,0 +1,78 @@
++"""Colors, status definitions, and UI constants."""
++
++from __future__ import annotations
++
++from enum import Enum
++
++
++class AgentStatus(str, Enum):
++    """Possible states of a Claude Code agent."""
++
++    WORKING = "WORKING"
++    IDLE = "IDLE"
++    WAITING_PERMISSION = "WAITING_PERMISSION"
++    WAITING_ANSWER = "WAITING_ANSWER"
++    ERROR = "ERROR"
++
++
++# Display mapping: symbol, label, hex color
++STATUS_DISPLAY: dict[AgentStatus, tuple[str, str, str]] = {
++    AgentStatus.WORKING:            (">>>", "WORK", "#a6e3a1"),
++    AgentStatus.IDLE:               ("---", "IDLE", "#9399b2"),
++    AgentStatus.WAITING_PERMISSION: ("[!]", "PERM", "#f38ba8"),
++    AgentStatus.WAITING_ANSWER:     ("[?]", "WAIT", "#f9e2af"),
++    AgentStatus.ERROR:              ("[X]", "ERR",  "#f5c2e7"),
++}
++
++# Statuses that need user attention (used by "jump to next red")
++ATTENTION_STATUSES = frozenset({
++    AgentStatus.WAITING_PERMISSION,
++    AgentStatus.WAITING_ANSWER,
++    AgentStatus.ERROR,
++})
++
++# Catppuccin Mocha theme palette
++THEME = {
++    "bg":      "#1e1e2e",
++    "green":   "#a6e3a1",
++    "cyan":    "#94e2d5",
++    "pink":    "#f5c2e7",
++    "red":     "#f38ba8",
++    "yellow":  "#f9e2af",
++    "grey":    "#9399b2",
++    "fg":      "#cdd6f4",
++    "dim":     "#7f849c",
++    "border":  "#585b70",
++    "accent":  "#313244",
++    "bright":  "#cdd6f4",
++}
++
++# Convenience aliases — single source of truth for TUI and tmux colours.
++GREEN  = THEME["green"]
++CYAN   = THEME["cyan"]
++PINK   = THEME["pink"]
++RED    = THEME["red"]
++YELLOW = THEME["yellow"]
++GREY   = THEME["grey"]
++DIM    = THEME["dim"]
++BORDER = THEME["border"]
++ACCENT = THEME["accent"]
++
++# Activity history length (sparkline points)
++ACTIVITY_HISTORY_LEN = 10
++
++# Extended sparkline width for telemetry panel
++TELEMETRY_HISTORY_LEN = 30
++
++# How many poll ticks (0.5s each) to accumulate before pushing a sparkline point
++# 10 ticks × 0.5s = 5s per bucket → 30 slots × 5s = 2.5 min visible history
++TELEMETRY_BUCKET_TICKS = 10
++
++# Sparkline characters (8 levels)
++SPARKLINE_CHARS = "▁▂▃▄▅▆▇█"
++
++# Braille spinner frames for WORKING status animation
++BRAILLE_SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
++
++# Global animation tick interval (seconds)
++ANIM_INTERVAL = 0.25
+--- /tmp/clorch/src/clorch/tui/app.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 08:51:11
+@@ -0,0 +1,1008 @@
++"""Main Textual TUI dashboard application — action-first control plane."""
++from __future__ import annotations
++
++from textual.app import App, ComposeResult
++from textual.binding import Binding
++from textual.events import Key
++from textual.screen import ModalScreen
++from textual.containers import Horizontal, Vertical
++from textual.widgets import Input, Label, Static
++
++from clorch.state.manager import StateManager
++from clorch.state.models import AgentState, StatusSummary, ActionItem, build_action_queue
++from clorch.constants import AgentStatus, ANIM_INTERVAL, TELEMETRY_HISTORY_LEN, TELEMETRY_BUCKET_TICKS
++from clorch.config import RULES_PATH
++from clorch.rules import RulesConfig, load_rules, evaluate
++from clorch.tui.widgets.session_list import SessionList, ListHeader
++from clorch.tui.widgets.agent_detail import AgentDetail
++from clorch.tui.widgets.header_bar import HeaderBar
++from clorch.tui.widgets.context_footer import ContextFooter
++from clorch.tui.widgets.telemetry_panel import TelemetryPanel
++from clorch.tui.widgets.event_log import EventLog
++from clorch.tui.widgets.settings_panel import SettingsPanel
++
++
++class PromptScreen(ModalScreen[str | None]):
++    """Modal prompt that returns user input or None on escape."""
++
++    DEFAULT_CSS = """
++    PromptScreen {
++        align: center middle;
++    }
++    PromptScreen > Vertical {
++        width: 50;
++        height: auto;
++        border: solid;
++        padding: 1 2;
++    }
++    PromptScreen Label {
++        margin-bottom: 1;
++        text-style: bold;
++    }
++    PromptScreen Input {
++        width: 100%;
++    }
++    """
++
++    def __init__(self, prompt: str, placeholder: str = "") -> None:
++        super().__init__()
++        self._prompt = prompt
++        self._placeholder = placeholder
++
++    def compose(self) -> ComposeResult:
++        with Vertical():
++            yield Label(self._prompt)
++            yield Input(placeholder=self._placeholder)
++
++    def on_input_submitted(self, event: Input.Submitted) -> None:
++        value = event.value.strip()
++        self.dismiss(value if value else None)
++
++    def on_key(self, event: Key) -> None:
++        if event.key == "escape":
++            self.dismiss(None)
++            event.prevent_default()
++
++
++class HelpScreen(ModalScreen[None]):
++    """Modal overlay showing grouped keybinding help."""
++
++    DEFAULT_CSS = """
++    HelpScreen {
++        align: center middle;
++    }
++    HelpScreen > Vertical {
++        width: 60;
++        height: auto;
++        max-height: 38;
++        border: solid;
++        padding: 1 2;
++    }
++    HelpScreen Static {
++        width: 100%;
++    }
++    """
++
++    def compose(self) -> ComposeResult:
++        from rich.text import Text
++        from clorch.constants import CYAN, GREEN, RED, GREY, YELLOW
++
++        text = Text()
++        text.append("CLAUDE ORCH HELP\n\n", style=f"bold {CYAN}")
++
++        text.append("PERMISSION APPROVAL\n", style=f"bold {YELLOW}")
++        text.append("  1. Press ", style="")
++        text.append("[a-z]", style=f"bold {CYAN}")
++        text.append(" to select a pending action\n")
++        text.append("  2. Read the full request message\n")
++        text.append("  3. Press ", style="")
++        text.append("[y]", style=f"bold {GREEN}")
++        text.append(" to approve or ", style="")
++        text.append("[n]", style=f"bold {RED}")
++        text.append(" to deny\n")
++        text.append("  Shortcut: ", style="")
++        text.append("[Y]", style=f"bold {GREEN}")
++        text.append(" approves ALL pending permissions\n\n")
++
++        text.append("NAVIGATION\n", style=f"bold {YELLOW}")
++        text.append("  [j/k]", style=f"bold {CYAN}")
++        text.append("     Move cursor up/down\n")
++        text.append("  [1-0]", style=f"bold {CYAN}")
++        text.append("     Select agent by number\n")
++        text.append("  [->]", style=f"bold {CYAN}")
++        text.append("      Jump to agent's tmux window\n")
++        text.append("  [d]", style=f"bold {CYAN}")
++        text.append("       Cycle detail: normal/expanded/hidden\n\n")
++
++        text.append("SETTINGS\n", style=f"bold {YELLOW}")
++        text.append("  [s]", style=f"bold {CYAN}")
++        text.append("       Toggle sound notifications\n")
++        text.append("  [!]", style=f"bold {CYAN}")
++        text.append("       Toggle YOLO mode (auto-approve)\n\n")
++
++        text.append("YOLO MODE & AUTO-APPROVE RULES\n", style=f"bold {YELLOW}")
++        text.append("  Config: ", style="dim")
++        text.append("~/.config/clorch/rules.yaml\n", style=f"{CYAN}")
++        text.append("  YOLO auto-approves all tools (tmux-only)\n", style="")
++        text.append("  ", style="")
++        text.append("Deny rules \u2192 manual review", style=f"bold {RED}")
++        text.append(", even in YOLO\n")
++        text.append("  Rules: tools + optional regex pattern\n", style="")
++        text.append("  First matching rule wins, default: ask\n\n", style="dim")
++
++        text.append("TMUX MANAGEMENT\n", style=f"bold {YELLOW}")
++        text.append("  [N]", style=f"bold {CYAN}")
++        text.append("       Create new tmux window\n")
++        text.append("  [R]", style=f"bold {CYAN}")
++        text.append("       Open terminal tab for selected agent\n")
++        text.append("  [X]", style=f"bold {CYAN}")
++        text.append("       Kill selected agent's window\n")
++        text.append("  [S/V]", style=f"bold {CYAN}")
++        text.append("     Split window (horizontal/vertical)\n\n")
++
++        text.append("Press ", style=f"dim {GREY}")
++        text.append("[?]", style=f"bold {CYAN}")
++        text.append(" or ", style=f"dim {GREY}")
++        text.append("[Esc]", style=f"bold {CYAN}")
++        text.append(" to close", style=f"dim {GREY}")
++
++        with Vertical():
++            yield Static(text)
++
++    def on_key(self, event: Key) -> None:
++        if event.key in ("escape", "question_mark"):
++            self.dismiss(None)
++            event.prevent_default()
++
++
++class OrchestratorApp(App):
++    """Clorch TUI Dashboard."""
++
++    CSS_PATH = "app.tcss"
++    TITLE = "Clorch"
++    THEME = "textual-ansi"
++
++    BINDINGS = [
++        Binding("q", "quit", "Quit", show=False),
++        Binding("d", "toggle_detail", "Detail", show=False),
++        Binding("r", "refresh", "Refresh", show=False),
++        Binding("j", "cursor_down", "Down", show=False),
++        Binding("k", "cursor_up", "Up", show=False),
++        Binding("right", "jump_to_agent", "Jump", show=False),
++        Binding("enter", "jump_to_agent", "Jump", show=False),
++        Binding("t", "jump_to_agent", "Jump", show=False),
++    ]
++
++    def __init__(self) -> None:
++        super().__init__()
++        self._manager = StateManager()
++        self._prev_states: dict[str, AgentStatus] = {}
++        self._detail_visible = True
++        self._detail_mode = "normal"  # "normal" | "expanded" | "hidden"
++        self._focused_action: ActionItem | None = None
++        self._action_items: list[ActionItem] = []
++        self._has_ever_approved: bool = False
++        self._hint_shown: bool = False
++        self._anim_frame: int = 0
++        self._prev_tool_counts: dict[str, int] = {}
++        self._extended_history: dict[str, list[int]] = {}
++        self._pending_deltas: dict[str, int] = {}
++        self._telemetry_tick: int = 0
++        self._rules_config: RulesConfig = RulesConfig()
++        self._skip_warned: set[str] = set()  # session IDs already warned about no-tmux skip
++
++    def compose(self) -> ComposeResult:
++        yield HeaderBar(id="header-bar")
++        with Horizontal(id="main-split"):
++            with Vertical(id="list-pane") as lp:
++                lp.border_title = "Agents"
++                yield ListHeader(id="list-header")
++                yield SessionList(id="session-list")
++            with Vertical(id="right-panel"):
++                settings = SettingsPanel(id="settings-panel")
++                settings.border_title = "Settings"
++                yield settings
++                detail = AgentDetail(id="detail-panel")
++                detail.border_title = "Detail"
++                yield detail
++                telemetry = TelemetryPanel(id="telemetry-panel")
++                telemetry.border_title = "Telemetry"
++                yield telemetry
++                event_log = EventLog(id="event-log-panel")
++                event_log.border_title = "Events"
++                yield event_log
++        yield ContextFooter(id="context-footer")
++
++    def on_mount(self) -> None:
++        self._refresh_timer = self.set_interval(0.5, self._poll_state)
++        self._cleanup_timer = self.set_interval(30, self._run_cleanup)
++        self._anim_timer = self.set_interval(ANIM_INTERVAL, self._tick_animation)
++        self._load_rules()
++        self._run_cleanup()
++        self._poll_state()
++        self._apply_tmux_statusbar()
++        self._init_header_tmux()
++
++    def _load_rules(self) -> None:
++        """Load auto-approve rules from config file."""
++        self._rules_config = load_rules(RULES_PATH)
++        settings = self.query_one("#settings-panel", SettingsPanel)
++        settings.set_rules_count(len(self._rules_config.rules))
++        settings.set_yolo(self._rules_config.yolo)
++        self.query_one("#header-bar", HeaderBar).set_yolo(self._rules_config.yolo)
++
++    def _run_cleanup(self) -> None:
++        """Remove stale state files (no activity for 30+ minutes)."""
++        removed = self._manager.cleanup_stale(max_age_seconds=1800)
++        if removed:
++            self.notify(f"Cleaned {removed} stale session(s)")
++
++    def _tick_animation(self) -> None:
++        """Global animation tick — advances spinners and pulses."""
++        self._anim_frame += 1
++        self.query_one("#header-bar", HeaderBar).tick_animation(self._anim_frame)
++        self.query_one("#session-list", SessionList).tick_animation(self._anim_frame)
++
++    def _poll_state(self) -> None:
++        agents = self._manager.scan()
++        summary = StatusSummary.from_agents(agents)
++
++        # Update header bar
++        self.query_one("#header-bar", HeaderBar).update_summary(summary)
++
++        # Build action queue
++        self._action_items = build_action_queue(agents)
++
++        # Auto-approve/deny via rules engine (tmux-only)
++        self._auto_evaluate_actions()
++
++        # Update session list (agents + inline action hints)
++        table = self.query_one("#session-list", SessionList)
++        table.update_agents(agents)
++        table.update_actions(self._action_items)
++
++        # --- Event detection (BEFORE updating _prev_states and _prev_tool_counts) ---
++        event_log = self.query_one("#event-log-panel", EventLog)
++        for agent in agents:
++            sid = agent.session_id
++            old_status = self._prev_states.get(sid)
++            if old_status is None:
++                continue  # new agent, skip
++            if old_status != agent.status:
++                # Reset skip-warning when agent leaves WAITING_PERMISSION
++                if old_status == AgentStatus.WAITING_PERMISSION:
++                    self._skip_warned.discard(sid)
++                # Status transition events
++                if agent.status == AgentStatus.WORKING:
++                    event_log.write_event(agent.project_name, "\u25b6", agent.last_tool or "working", "green")
++                elif agent.status == AgentStatus.IDLE:
++                    event_log.write_event(agent.project_name, "\u25fc", "idle", "grey")
++                elif agent.status == AgentStatus.WAITING_PERMISSION:
++                    summary_text = (agent.tool_request_summary or "")[:60]
++                    event_log.write_event(agent.project_name, "\u26a0", f"PERM: {summary_text}", "red")
++                elif agent.status == AgentStatus.ERROR:
++                    event_log.write_event(agent.project_name, "\u2717", "error", "pink")
++            # Tool usage (delta > 0 and status stayed WORKING)
++            elif agent.status == AgentStatus.WORKING:
++                delta = max(0, agent.tool_count - self._prev_tool_counts.get(sid, agent.tool_count))
++                if delta > 0 and agent.last_tool:
++                    event_log.write_event(agent.project_name, "\u2699", agent.last_tool, "cyan")
++
++        # --- Toast on state changes + sound alerts ---
++        sound_status: AgentStatus | None = None
++        current_states: dict[str, AgentStatus] = {}
++        for agent in agents:
++            current_states[agent.session_id] = agent.status
++            old = self._prev_states.get(agent.session_id)
++            if old is not None and old != agent.status:
++                name = agent.project_name or agent.session_id[:12]
++                from clorch.constants import STATUS_DISPLAY
++                _, old_label, _ = STATUS_DISPLAY[old]
++                _, new_label, _ = STATUS_DISPLAY[agent.status]
++                severity = "warning" if agent.needs_attention else "information"
++                self.notify(f"{name}: {old_label} \u2192 {new_label}", severity=severity)
++                # Track highest-priority attention status for sound
++                if agent.needs_attention and sound_status is None:
++                    sound_status = agent.status
++        self._prev_states = current_states
++
++        # Play sound alert (once per poll cycle, highest priority)
++        if sound_status and self.query_one("#settings-panel", SettingsPanel).sound_enabled:
++            from clorch.notifications.sound import play_status_sound
++            play_status_sound(sound_status)
++
++        # --- Extended history update (bucketed) ---
++        for agent in agents:
++            sid = agent.session_id
++            prev_tc = self._prev_tool_counts.get(sid, agent.tool_count)
++            delta = max(0, agent.tool_count - prev_tc)
++            self._prev_tool_counts[sid] = agent.tool_count
++            self._pending_deltas[sid] = self._pending_deltas.get(sid, 0) + delta
++
++        self._telemetry_tick += 1
++        if self._telemetry_tick >= TELEMETRY_BUCKET_TICKS:
++            self._telemetry_tick = 0
++            for sid, accumulated in self._pending_deltas.items():
++                hist = self._extended_history.setdefault(sid, [0] * TELEMETRY_HISTORY_LEN)
++                hist.append(accumulated)
++                if len(hist) > TELEMETRY_HISTORY_LEN:
++                    self._extended_history[sid] = hist[-TELEMETRY_HISTORY_LEN:]
++            self._pending_deltas.clear()
++
++        # Cleanup dead sessions
++        dead = set(self._extended_history) - {a.session_id for a in agents}
++        for sid in dead:
++            self._extended_history.pop(sid, None)
++            self._prev_tool_counts.pop(sid, None)
++            self._pending_deltas.pop(sid, None)
++            self._skip_warned.discard(sid)
++
++        # --- Update detail + telemetry if visible ---
++        if self._detail_mode != "hidden":
++            selected = table.get_selected_agent()
++            self.query_one("#detail-panel", AgentDetail).show_agent(selected)
++            selected_id = selected.session_id if selected else None
++            self.query_one("#telemetry-panel", TelemetryPanel).update_agents(
++                agents, selected_id, self._extended_history
++            )
++
++        # First-permission hint (one-time toast)
++        has_perm = any(item.actionable for item in self._action_items)
++        if has_perm and not self._has_ever_approved and not self._hint_shown:
++            self._hint_shown = True
++            self.notify(
++                "Permission needed! Press letter (e.g. [a]) to select, "
++                "then [y] to approve. [?] for help",
++                severity="warning",
++                timeout=8,
++            )
++
++        # Update footer context
++        self._update_footer_mode()
++
++    def _update_footer_mode(self) -> None:
++        """Set the footer mode based on current state."""
++        footer = self.query_one("#context-footer", ContextFooter)
++        if self._focused_action:
++            footer.set_mode("approval")
++        elif self._action_items:
++            footer.set_mode("actions")
++        else:
++            footer.set_mode("default")
++
++    # ------------------------------------------------------------------
++    # Auto-approve / YOLO
++    # ------------------------------------------------------------------
++
++    def _auto_evaluate_actions(self) -> None:
++        """Run rules engine on WAITING_PERMISSION agents and auto-approve/deny."""
++        event_log = self.query_one("#event-log-panel", EventLog)
++        remaining: list[ActionItem] = []
++
++        for item in self._action_items:
++            if not item.actionable:
++                remaining.append(item)
++                continue
++
++            agent = item.agent
++            tool_name = agent.last_tool or ""
++            tool_summary = agent.tool_request_summary or ""
++            decision = evaluate(self._rules_config, tool_name, tool_summary)
++
++            if decision == "ask":
++                remaining.append(item)
++                continue
++
++            # Only auto-approve/deny agents in tmux sessions
++            if not agent.tmux_window:
++                if agent.session_id not in self._skip_warned:
++                    self._skip_warned.add(agent.session_id)
++                    name = agent.project_name or agent.session_id[:12]
++                    event_log.write_event(name, "\u26a0", "skip auto-approve: no tmux", "yellow")
++                remaining.append(item)
++                continue
++
++            name = agent.project_name or agent.session_id[:12]
++
++            # Safety re-poll before acting
++            if not self._manager.verify_status(agent.session_id, AgentStatus.WAITING_PERMISSION):
++                remaining.append(item)
++                continue
++
++            key = "y" if decision == "approve" else "n"
++            if self._send_approval(agent, key):
++                label = "auto-approved" if decision == "approve" else "auto-denied"
++                icon = "\u2714" if decision == "approve" else "\u2718"
++                color = "green" if decision == "approve" else "red"
++                event_log.write_event(name, icon, f"{label}: {tool_name}", color)
++            else:
++                remaining.append(item)
++
++        self._action_items = remaining
++
++    def _toggle_yolo(self) -> None:
++        """Toggle YOLO mode on/off (runtime override of config)."""
++        self._rules_config.yolo = not self._rules_config.yolo
++        yolo = self._rules_config.yolo
++        self.query_one("#header-bar", HeaderBar).set_yolo(yolo)
++        self.query_one("#settings-panel", SettingsPanel).set_yolo(yolo)
++        if yolo:
++            self.notify("YOLO mode ON \u2014 auto-approve all (tmux only)", severity="warning")
++        else:
++            self.notify("YOLO mode OFF")
++
++    # ------------------------------------------------------------------
++    # Key dispatch
++    # ------------------------------------------------------------------
++
++    def on_key(self, event: Key) -> None:
++        """Dynamic key dispatch: letters for actions, numbers for sessions."""
++        key = event.key
++
++        # ! — toggle YOLO mode
++        if key == "exclamation_mark":
++            self._toggle_yolo()
++            event.prevent_default()
++            return
++
++        # ? — help overlay
++        if key == "question_mark":
++            self.push_screen(HelpScreen())
++            event.prevent_default()
++            return
++
++        # Esc — cancel focused action
++        if key == "escape":
++            if self._focused_action:
++                self._clear_focused_action()
++                event.prevent_default()
++                return
++
++        # s — toggle sound notifications
++        if key == "s":
++            panel = self.query_one("#settings-panel", SettingsPanel)
++            enabled = panel.toggle_sound()
++            self.notify(f"Sound {'ON' if enabled else 'OFF'}")
++            event.prevent_default()
++            return
++
++        # Shift+N: new tmux window
++        if key == "N":
++            self._prompt_new_window()
++            event.prevent_default()
++            return
++
++        # Shift+S: split selected agent's window (horizontal)
++        # Shift+V: split selected agent's window (vertical)
++        if key == "S":
++            self._split_agent_window(horizontal=True)
++            event.prevent_default()
++            return
++        if key == "V":
++            self._split_agent_window(horizontal=False)
++            event.prevent_default()
++            return
++
++        # Shift+X: kill selected agent's tmux window
++        if key == "X":
++            self._kill_agent_window()
++            event.prevent_default()
++            return
++
++        # Shift+R: reattach — open iTerm tab to selected agent's tmux window
++        if key == "R":
++            self._reattach_agent_window()
++            event.prevent_default()
++            return
++
++        # Shift+Y: batch approve all PERM
++        if key == "Y":
++            self._confirm_approve_all()
++            event.prevent_default()
++            return
++
++        # y/n: approve/deny the focused action (or auto-select if single PERM)
++        if key == "y":
++            if self._focused_action:
++                self._approve_action(self._focused_action)
++            else:
++                approvable = [i for i in self._action_items if i.actionable]
++                if len(approvable) == 1:
++                    self._approve_action(approvable[0])
++                elif approvable:
++                    self._focused_action = approvable[0]
++                    self.query_one("#session-list", SessionList).set_action_focus(approvable[0].letter)
++                    self._update_footer_mode()
++                    name = approvable[0].agent.project_name or approvable[0].agent.session_id[:12]
++                    self.notify(f"Multiple PERMs — focused [{approvable[0].letter}] {name}. Press [y] again to approve, or select another.")
++                else:
++                    return  # no PERM items, let fall through to a-z
++            event.prevent_default()
++            return
++        if key == "n" and self._focused_action:
++            self._deny_action(self._focused_action)
++            event.prevent_default()
++            return
++
++        # a-z: select action by letter
++        if len(key) == 1 and "a" <= key <= "z":
++            action = self._get_action(key)
++            if action:
++                if action.actionable:
++                    # PERM: focus the action for y/n
++                    self._focused_action = action
++                    self.query_one("#session-list", SessionList).set_action_focus(key)
++                    self._update_footer_mode()
++                    name = action.agent.project_name or action.agent.session_id[:12]
++                    self.notify(f"Selected [{key}] {name} — press [y] approve / [n] deny")
++                else:
++                    # Non-actionable (ASK/ERR): jump directly
++                    self._jump_to_session(action.agent)
++                event.prevent_default()
++                return
++
++        # 0-9: jump to agent by row number
++        if key.isdigit():
++            num = int(key)
++            self._select_agent_by_number(num)
++            event.prevent_default()
++            return
++
++    # ------------------------------------------------------------------
++    # Focus helpers
++    # ------------------------------------------------------------------
++
++    def _clear_focused_action(self) -> None:
++        """Clear the focused action and reset footer/queue state."""
++        self._focused_action = None
++        self.query_one("#session-list", SessionList).clear_action_focus()
++        self._update_footer_mode()
++
++    def _get_action(self, letter: str) -> ActionItem | None:
++        """Look up an action by its assigned letter."""
++        for item in self._action_items:
++            if item.letter == letter:
++                return item
++        return None
++
++    # ------------------------------------------------------------------
++    # Action handlers
++    # ------------------------------------------------------------------
++
++    def _approve_action(self, action: ActionItem) -> None:
++        """Approve a permission request: verify status, then send 'y' + Enter."""
++        agent = action.agent
++        name = agent.project_name or agent.session_id[:12]
++
++        # Safety re-poll
++        if not self._manager.verify_status(agent.session_id, AgentStatus.WAITING_PERMISSION):
++            self.notify(f"{name}: status changed, aborting approve", severity="warning")
++            self._clear_focused_action()
++            return
++
++        if not self._send_approval(agent, "y"):
++            return
++
++        self._has_ever_approved = True
++        self.notify(f"Approved: {name}")
++        self.query_one("#event-log-panel", EventLog).write_event(name, "\u2714", "approved", "green")
++        self._clear_focused_action()
++
++    def _deny_action(self, action: ActionItem) -> None:
++        """Deny a permission request: verify status, then send 'n' + Enter."""
++        agent = action.agent
++        name = agent.project_name or agent.session_id[:12]
++
++        # Safety re-poll
++        if not self._manager.verify_status(agent.session_id, AgentStatus.WAITING_PERMISSION):
++            self.notify(f"{name}: status changed, aborting deny", severity="warning")
++            self._clear_focused_action()
++            return
++
++        if not self._send_approval(agent, "n"):
++            return
++
++        self._has_ever_approved = True
++        self.notify(f"Denied: {name}")
++        self.query_one("#event-log-panel", EventLog).write_event(name, "\u2718", "denied", "red")
++        self._clear_focused_action()
++
++    def _send_approval(self, agent: AgentState, key: str) -> bool:
++        """Map agent to tmux window and send keystroke.
++
++        Only uses tmux send-keys when the agent actually lives in a tmux
++        pane (``tmux_window`` is set by the hook).  Falls back to jumping
++        to the terminal tab so the user can approve/deny manually.
++        Agents in unreachable terminals are blocked with a warning.
++        """
++        from clorch.tmux.navigator import map_agent_to_window, jump_to_tab
++        from clorch.tmux.session import TmuxSession
++
++        name = agent.project_name or agent.session_id[:12]
++
++        # Reachability check
++        table = self.query_one("#session-list", SessionList)
++        if not table.is_agent_reachable(agent):
++            from clorch.tui.widgets.session_list import _agent_terminal_group
++            remote = _agent_terminal_group(agent)
++            local = table._local_terminal
++            self.notify(f"Cannot reach {name} from {local} (agent in {remote})", severity="warning")
++            return False
++
++        # Only attempt tmux send-keys when the hook confirmed the agent
++        # is inside a tmux pane (tmux_window is non-empty).  Without this
++        # guard, cwd-based matching can send keystrokes to an unrelated
++        # zsh pane that happens to share the same working directory.
++        if agent.tmux_window:
++            tmux = TmuxSession()
++            if tmux.is_available() and tmux.exists():
++                target = tmux.get_pane_target(agent.tmux_window, agent.tmux_pane or "0")
++                ok = tmux.send_keys(target, key, literal=True)
++                if ok:
++                    tmux.send_keys(target, "Enter")
++                    return True
++                self.notify(f"tmux send-keys failed for {name}", severity="warning")
++
++        # Agent is not in tmux — switch to its terminal tab
++        if jump_to_tab(agent):
++            action = "approve" if key == "y" else "deny"
++            self.notify(f"Switched to {name} — please {action} manually", severity="information")
++            return True
++
++        self.notify(f"No window/tab found for {name}", severity="error")
++        return False
++
++    def _confirm_approve_all(self) -> None:
++        """Batch-approve all PERM action items."""
++        approvable = [item for item in self._action_items if item.actionable]
++        if not approvable:
++            self.notify("No permission requests to approve", severity="information")
++            return
++
++        approved = 0
++        for item in approvable:
++            agent = item.agent
++            if self._manager.verify_status(agent.session_id, AgentStatus.WAITING_PERMISSION):
++                if self._send_approval(agent, "y"):
++                    approved += 1
++
++        self._has_ever_approved = True
++        self.notify(f"Approved {approved}/{len(approvable)} permission requests")
++        event_log = self.query_one("#event-log-panel", EventLog)
++        event_log.write_event("all", "\u2714", f"batch approved {approved}/{len(approvable)}", "green")
++        self._clear_focused_action()
++
++    def _select_agent_by_number(self, num: int) -> None:
++        """Select an agent by number key and optionally jump to its session."""
++        table = self.query_one("#session-list", SessionList)
++        agent = table.get_agent_by_number(num)
++        if agent:
++            # Move cursor to that row (accounts for separators)
++            idx = num - 1 if num != 0 else 9
++            table.move_cursor(row=idx)
++            if self._detail_mode != "hidden":
++                self.query_one("#detail-panel", AgentDetail).show_agent(agent)
++
++    def _jump_to_session(self, agent: AgentState) -> None:
++        """Jump to the terminal running the agent's Claude process.
++
++        Three paths depending on how the agent is running:
++        - **tmux**: ``select-window`` + ``select-pane`` (CC mode
++          auto-switches the terminal tab), then bring terminal to front.
++        - **plain terminal**: PID → tty → terminal tab activation.
++        - **fallback for tmux**: switch to existing tmux session if one
++          matches the agent's project name.
++
++        Dead processes are cleaned up inline so the user never lands
++        on a stale tab.
++        """
++        import subprocess
++        from clorch.tmux.navigator import (
++            jump_to_tab, select_tmux_pane, bring_terminal_to_front,
++            pid_alive,
++        )
++
++        name = agent.project_name or agent.session_id[:12]
++
++        # Dead process check — remove stale state file immediately
++        if agent.pid and not pid_alive(agent.pid):
++            state_file = self._manager._state_dir / f"{agent.session_id}.json"
++            state_file.unlink(missing_ok=True)
++            self.notify(f"{name}: process dead, removed", severity="warning")
++            return
++
++        # tmux session: select-window + select-pane (CC mode follows)
++        if agent.tmux_window:
++            if select_tmux_pane(agent):
++                bring_terminal_to_front()
++                self.notify(f"Jumped to {name}")
++                return
++
++        # Plain terminal: PID → tty → tab
++        if jump_to_tab(agent):
++            self.notify(f"Jumped to {name}")
++            return
++
++        # Fallback: try to jump to an existing tmux session for this project
++        if agent.cwd:
++            import os
++            from clorch.terminal import get_backend
++            session_name = os.path.basename(agent.cwd).replace(".", "_").replace("/", "_")
++            result = subprocess.run(
++                ["tmux", "has-session", "-t", session_name],
++                capture_output=True,
++            )
++            if result.returncode == 0:
++                # Step 1: Find and activate the iTerm tab running tmux
++                backend = get_backend()
++                # Try to find a tab with "tmux" in its name first
++                tab_found = backend.activate_by_name("tmux")
++                if not tab_found:
++                    # Try the session name in case tmux tab title shows it
++                    tab_found = backend.activate_by_name(session_name)
++
++                # Step 2: Now that we're on the tmux tab, switch the session
++                subprocess.run(
++                    ["tmux", "switch-client", "-t", session_name],
++                    capture_output=True,
++                )
++                if tab_found:
++                    self.notify(f"Jumped to tmux session: {session_name}")
++                else:
++                    self.notify(f"Switched tmux to {session_name} — click the tmux tab", severity="information")
++                return
++
++        # Determine where the agent is running for a helpful message
++        from clorch.tui.widgets.session_list import _agent_terminal_group
++        terminal = _agent_terminal_group(agent)
++        if terminal and terminal != "tmux":
++            self.notify(f"{name} is running in {terminal} — switch there manually", severity="information")
++        elif not agent.pid:
++            self.notify(f"{name}: no PID — restart session", severity="warning")
++        else:
++            self.notify(f"No tab found for {name}", severity="warning")
++
++    def _apply_tmux_statusbar(self) -> None:
++        """Apply clorch status bar options to an existing tmux session."""
++        from clorch.tmux.session import TmuxSession
++        tmux = TmuxSession()
++        if tmux.is_available() and tmux.exists():
++            tmux._apply_options()
++            tmux._apply_keybindings()
++
++    def _init_header_tmux(self) -> None:
++        """Set the tmux session name in the header bar."""
++        from clorch.tmux.session import TmuxSession
++        tmux = TmuxSession()
++        if tmux.is_available() and tmux.exists():
++            self.query_one("#header-bar", HeaderBar).set_tmux_session(tmux.session)
++
++    # ------------------------------------------------------------------
++    # Tmux window / pane management
++    # ------------------------------------------------------------------
++
++    def _get_tmux(self, create: bool = False):
++        """Return a TmuxSession if available, else None with a toast.
++
++        When *create* is ``True``, a new detached session is created
++        automatically if one doesn't exist yet.
++        """
++        from clorch.tmux.session import TmuxSession
++        tmux = TmuxSession()
++        if not tmux.is_available():
++            self.notify("tmux not installed", severity="error")
++            return None
++        if not tmux.exists():
++            if create:
++                tmux._create_session()
++                tmux._apply_options()
++                tmux._apply_keybindings()
++            else:
++                self.notify("No tmux session — press [N] to create a window", severity="warning")
++                return None
++        return tmux
++
++    def _open_tmux_tab(self, tmux, window: str) -> None:
++        """Open a terminal tab attached to a specific tmux window.
++
++        Uses ``exec tmux new-session`` (no ``-d``) so the shell in the
++        new tab is replaced by the tmux client immediately.  A linked
++        session is created grouped with the main session and pinned to
++        *window*.  ``destroy-unattached`` is set via ``\\;`` *after*
++        the attach so the session isn't killed prematurely.
++        """
++        import shlex
++
++        session = tmux.session
++        linked = f"{session}-{window}"
++        q_linked = shlex.quote(linked)
++        q_session = shlex.quote(session)
++        q_window = shlex.quote(window)
++        # Background monitor approach:
++        # 1. Spawn a HUP-immune subshell that polls for the linked session
++        # 2. exec replaces the shell with the tmux client
++        # 3. When Cmd+W closes the tab → tmux client exits →
++        #    destroy-unattached kills linked session →
++        #    monitor detects it → kill-window cleans up the tmux window
++        cmd = (
++            f"(trap '' HUP; while tmux has-session -t {q_linked} 2>/dev/null; "
++            f"do sleep 1; done; "
++            f"tmux kill-window -t {q_session}:{q_window} 2>/dev/null) & "
++            f"tmux kill-session -t {q_linked} 2>/dev/null; "
++            f"sleep 0.2; "
++            f"exec tmux new-session -t {q_session} -s {q_linked} "
++            f"\\; select-window -t :{q_window} "
++            f"\\; set-option destroy-unattached on"
++        )
++
++        from clorch.terminal import get_backend
++        backend = get_backend()
++        if not backend.open_tab(cmd):
++            # Terminal can't open tabs (e.g. Ghostty) — just switch to the
++            # window inside the existing tmux session and bring terminal forward.
++            tmux.select_window(window)
++            backend.bring_to_front()
++
++    def _prompt_new_window(self) -> None:
++        """Show a modal prompt and create a new tmux window."""
++        def on_result(name: str | None) -> None:
++            if not name:
++                return
++            from clorch.tmux.session import TmuxSession
++            tmux = TmuxSession()
++            if not tmux.is_available():
++                self.notify("tmux not installed", severity="error")
++                return
++
++            if not tmux.exists():
++                # Create session with this window as the first
++                tmux.run_command(
++                    "new-session", "-d", "-s", tmux.session, "-n", name,
++                )
++                tmux._apply_options()
++                tmux._apply_keybindings()
++            else:
++                # Check if window already exists — reattach instead of creating a duplicate
++                existing = [w["name"] for w in tmux.list_windows()]
++                if name not in existing:
++                    tmux.add_window(name)
++
++            self._open_tmux_tab(tmux, name)
++            self.notify(f"Opened window: {name}")
++
++        self.push_screen(PromptScreen("New window name:", placeholder="backend"), on_result)
++
++    def _split_agent_window(self, horizontal: bool) -> None:
++        """Split the selected agent's tmux window."""
++        tmux = self._get_tmux()
++        if not tmux:
++            return
++
++        table = self.query_one("#session-list", SessionList)
++        agent = table.get_selected_agent()
++        if not agent:
++            self.notify("No agent selected", severity="warning")
++            return
++
++        from clorch.tmux.navigator import map_agent_to_window
++        window = map_agent_to_window(agent, tmux)
++        if not window:
++            self.notify(f"No tmux window for {agent.project_name}", severity="warning")
++            return
++
++        direction = "horizontal" if horizontal else "vertical"
++        if tmux.split_window(window, horizontal=horizontal, cwd=agent.cwd or None):
++            self.notify(f"Split {agent.project_name} ({direction})")
++        else:
++            self.notify(f"Failed to split {agent.project_name}", severity="error")
++
++    def _kill_agent_window(self) -> None:
++        """Kill the selected agent's tmux window (and processes inside it)."""
++        tmux = self._get_tmux()
++        if not tmux:
++            return
++
++        table = self.query_one("#session-list", SessionList)
++        agent = table.get_selected_agent()
++        if not agent:
++            self.notify("No agent selected", severity="warning")
++            return
++
++        from clorch.tmux.navigator import map_agent_to_window
++        window = map_agent_to_window(agent, tmux)
++        if not window:
++            self.notify(f"No tmux window for {agent.project_name}", severity="warning")
++            return
++
++        name = agent.project_name or agent.session_id[:12]
++        result = tmux.run_command(
++            "kill-window", "-t", f"{tmux.session}:{window}", check=False,
++        )
++        if result.returncode == 0:
++            self.notify(f"Killed window: {name}")
++        else:
++            self.notify(f"Failed to kill {name}", severity="error")
++
++    def _reattach_agent_window(self) -> None:
++        """Open an iTerm tab attached to the selected agent's tmux window."""
++        tmux = self._get_tmux()
++        if not tmux:
++            return
++
++        table = self.query_one("#session-list", SessionList)
++        agent = table.get_selected_agent()
++        if not agent:
++            self.notify("No agent selected", severity="warning")
++            return
++
++        from clorch.tmux.navigator import map_agent_to_window
++        window = map_agent_to_window(agent, tmux)
++        if not window:
++            self.notify(f"No tmux window for {agent.project_name}", severity="warning")
++            return
++
++        name = agent.project_name or agent.session_id[:12]
++        self._open_tmux_tab(tmux, window)
++        self.notify(f"Reattached: {name}")
++
++    # ------------------------------------------------------------------
++    # Standard actions
++    # ------------------------------------------------------------------
++
++    def on_session_list_agent_highlighted(self, event: SessionList.AgentHighlighted) -> None:
++        """Update detail panel when cursor moves to a new agent."""
++        if self._detail_mode != "hidden":
++            self.query_one("#detail-panel", AgentDetail).show_agent(event.agent)
++
++    def action_toggle_detail(self) -> None:
++        """Cycle right panel: normal -> expanded -> hidden -> normal."""
++        panel = self.query_one("#right-panel", Vertical)
++
++        if self._detail_mode == "normal":
++            self._detail_mode = "expanded"
++        elif self._detail_mode == "expanded":
++            self._detail_mode = "hidden"
++        else:
++            self._detail_mode = "normal"
++
++        self._detail_visible = self._detail_mode != "hidden"
++        self._apply_detail_mode(panel)
++
++    def _apply_detail_mode(self, panel) -> None:
++        """Apply CSS classes and content based on current detail mode."""
++        panel.remove_class("expanded", "detail-hidden")
++
++        if self._detail_mode == "expanded":
++            panel.add_class("expanded")
++        elif self._detail_mode == "hidden":
++            panel.add_class("detail-hidden")
++
++        if self._detail_mode != "hidden":
++            table = self.query_one("#session-list", SessionList)
++            agent = table.get_selected_agent()
++            self.query_one("#detail-panel", AgentDetail).show_agent(agent)
++        else:
++            self.query_one("#detail-panel", AgentDetail).show_agent(None)
++
++    def action_jump_to_agent(self) -> None:
++        """Jump to the selected agent's tmux window."""
++        table = self.query_one("#session-list", SessionList)
++        agent = table.get_selected_agent()
++        if agent:
++            self._jump_to_session(agent)
++
++    def action_refresh(self) -> None:
++        self._poll_state()
++        self.notify("Refreshed")
++
++    def action_cursor_down(self) -> None:
++        self.query_one("#session-list", SessionList).action_cursor_down()
++
++    def action_cursor_up(self) -> None:
++        self.query_one("#session-list", SessionList).action_cursor_up()
++
++
++def run_dashboard() -> None:
++    """Entry point to launch the dashboard."""
++    app = OrchestratorApp()
++    app.run()
+--- /tmp/clorch/src/clorch/tui/app.tcss	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.tcss	2026-02-27 08:31:11
+@@ -0,0 +1,119 @@
++/* -- Catppuccin Mocha theme — lazydocker-style bordered panels -- */
++
++Screen {
++    background: #1e1e2e;
++}
++
++/* -- Header: docked top, no border -- */
++
++#header-bar {
++    height: 3;
++    padding: 1 1;
++    text-style: bold;
++    dock: top;
++}
++
++/* -- Footer: docked bottom, no border -- */
++
++#context-footer {
++    height: 1;
++    padding: 0 1;
++    dock: bottom;
++    color: #9399b2;
++}
++
++/* -- Main split: list left, right panel right -- */
++
++#main-split {
++    height: 1fr;
++}
++
++/* -- List pane: bordered panel with title -- */
++
++#list-pane {
++    width: 2fr;
++    height: 1fr;
++    border: round #585b70;
++    border-title-color: #89b4fa;
++    border-title-style: bold;
++    padding: 0;
++}
++
++#list-pane:focus-within {
++    border: round #89b4fa;
++}
++
++/* -- Column header inside list pane -- */
++
++#list-header {
++    height: 1;
++    padding: 0 1;
++}
++
++/* -- Session list -- */
++
++#session-list {
++    height: 1fr;
++    min-height: 4;
++    scrollbar-size: 1 1;
++    background: #1e1e2e;
++}
++
++#session-list > ListItem.--highlight {
++    background: #45475a;
++}
++
++/* -- Right panel: vertical stack of sub-panels -- */
++
++#right-panel {
++    width: 1fr;
++    height: 1fr;
++}
++
++#right-panel.expanded {
++    width: 2fr;
++}
++
++#right-panel.detail-hidden {
++    display: none;
++}
++
++/* -- Sub-panels: each bordered -- */
++
++#settings-panel {
++    height: auto;
++    max-height: 6;
++    border: round #585b70;
++    border-title-color: #89b4fa;
++    border-title-style: bold;
++    padding: 0 1;
++}
++
++#detail-panel {
++    height: auto;
++    max-height: 8;
++    border: round #585b70;
++    border-title-color: #89b4fa;
++    border-title-style: bold;
++    padding: 0 1;
++}
++
++#telemetry-panel {
++    height: auto;
++    max-height: 12;
++    border: round #585b70;
++    border-title-color: #89b4fa;
++    border-title-style: bold;
++    padding: 0 1;
++}
++
++#event-log-panel {
++    height: 1fr;
++    border: round #585b70;
++    border-title-color: #89b4fa;
++    border-title-style: bold;
++    padding: 0 1;
++    background: #1e1e2e;
++    scrollbar-size-horizontal: 0;
++    scrollbar-size-vertical: 0;
++}
+--- /tmp/clorch/src/clorch/tui/widgets/session_list.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/session_list.py	2026-02-27 08:31:28
+@@ -0,0 +1,618 @@
++"""Session list widget — ListView replacement for AgentTable (DataTable)."""
++from __future__ import annotations
++
++from datetime import datetime, timezone
++
++from textual.app import ComposeResult
++from textual.widgets import ListView, ListItem, Static
++from textual.message import Message
++from rich.text import Text
++
++from clorch.state.models import AgentState, ActionItem
++from clorch.terminal.detect import get_terminal_label, normalize_term_program
++from clorch.constants import (
++    AgentStatus, STATUS_DISPLAY, SPARKLINE_CHARS, BRAILLE_SPINNER,
++    CYAN, GREEN, GREY, PINK, RED, YELLOW,
++)
++
++
++class ListHeader(Static):
++    """Column header row matching SessionRow column widths."""
++
++    def on_mount(self) -> None:
++        text = Text()
++        # Col 1: accent (2) + Col 2: num (3) + separator (1) = 6 chars
++        text.append("      ", style=f"{GREY}")
++        # Col 3: project name (12)
++        text.append(f"{'NAME':<12s}", style=f"bold {GREY}")
++        # Col 3b: git branch (10)
++        text.append(f"{'BRANCH':<10s}", style=f"bold {GREY}")
++        # Col 4: status (1 space + 8)
++        text.append(f" {'STATUS':<8s}", style=f"bold {GREY}")
++        # Col 4b: stale (5)
++        text.append(f"{'':5s}", style=f"{GREY}")
++        # Col 5: tool (1 space + 12)
++        text.append(f" {'TOOL':<12s}", style=f"bold {GREY}")
++        # Col 6: tool count (4)
++        text.append(f"{'#T':>4s}", style=f"bold {GREY}")
++        # Col 7: error count (3)
++        text.append(f"{'#E':>3s}", style=f"bold {GREY}")
++        # Col 8: uptime (8)
++        text.append(f"{'UPTIME':>8s}", style=f"bold {GREY}")
++        # Col 9: sparkline (2 space + 10)
++        text.append(f"  {'ACTIVITY':<10s}", style=f"bold {GREY}")
++        self.update(text)
++
++
++class GroupSeparator(ListItem):
++    """Non-selectable separator row showing a terminal group name."""
++
++    DEFAULT_CSS = """
++    GroupSeparator {
++        height: auto;
++        padding: 0 1;
++    }
++    """
++
++    def __init__(self, label: str, **kwargs) -> None:
++        super().__init__(**kwargs)
++        self._label = label
++        self.disabled = True
++
++    def compose(self) -> ComposeResult:
++        text = Text()
++        text.append(f"── {self._label} ", style=f"bold {GREY}")
++        text.append("─" * 40, style=f"bold {GREY}")
++        yield Static(text, markup=False)
++
++
++def _agent_terminal_group(agent: AgentState) -> str:
++    """Compute the terminal group key for an agent.
++
++    - If the agent has a ``tmux_window`` → group is ``"tmux"``.
++    - Otherwise → normalized ``term_program`` label.
++    """
++    if agent.tmux_window:
++        return "tmux"
++    return normalize_term_program(agent.term_program)
++
++
++def _group_sort_key(group: str, local_terminal: str) -> tuple[int, str]:
++    """Sort key so local terminal comes first, tmux second, then alphabetical."""
++    if group == local_terminal:
++        return (0, group)
++    if group == "tmux":
++        return (1, group)
++    return (2, group)
++
++
++class SessionRow(ListItem):
++    """A single agent row in the session list.
++
++    Renders: row number, project name, status badge, mini sparkline.
++    Attention rows get a colored left accent and inline action hints.
++    """
++
++    DEFAULT_CSS = """
++    SessionRow {
++        height: auto;
++        padding: 0 1;
++    }
++    """
++
++    def __init__(self, agent: AgentState, row_num: int, dim: bool = False, **kwargs) -> None:
++        super().__init__(**kwargs)
++        self.agent = agent
++        self._row_num = row_num
++        self._dim = dim
++        self._action: ActionItem | None = None
++        self._action_focused: bool = False
++        self._anim_frame: int = 0
++
++    def compose(self) -> ComposeResult:
++        yield Static(self._render_row(), markup=False)
++
++    def set_action(self, action: ActionItem | None) -> None:
++        """Associate an action item with this row."""
++        self._action = action
++        self._action_focused = False
++        self._refresh_display()
++
++    def set_action_focused(self, focused: bool) -> None:
++        """Set whether this row's action is currently focused for approval."""
++        if self._action_focused != focused:
++            self._action_focused = focused
++            self._refresh_display()
++
++    def set_anim_frame(self, frame: int) -> None:
++        """Set the global animation frame and re-render if animated."""
++        if self._anim_frame != frame:
++            self._anim_frame = frame
++            # Only re-render if this row has animation (WORKING or PERM)
++            if self.agent.status in (AgentStatus.WORKING, AgentStatus.WAITING_PERMISSION):
++                self._refresh_display()
++
++    def update_row(self, agent: AgentState, row_num: int, dim: bool | None = None) -> None:
++        """Update the row with new agent data."""
++        self.agent = agent
++        self._row_num = row_num
++        if dim is not None:
++            self._dim = dim
++        self._refresh_display()
++
++    def _refresh_display(self) -> None:
++        """Re-render the row content."""
++        try:
++            static = self.query_one(Static)
++            static.update(self._render_row())
++        except Exception:
++            pass
++
++    # Fixed column widths for vertical alignment across all rows.
++    _COL_ACCENT = 2     # "┃ " or "  "
++    _COL_NUM = 3        # "[a]" or " 1 "
++    _COL_PROJECT = 12   # project name padded
++    _COL_BRANCH = 10    # git branch padded
++    _COL_STATUS = 8     # ">>> WORK" / "[!] PERM" — symbol(3) + space + label(4)
++    _COL_STALE = 5      # stale age indicator
++    _COL_TOOL = 12      # last tool name padded
++    _COL_TCNT = 4       # tool count right-aligned
++    _COL_ECNT = 3       # error count right-aligned
++    _COL_UPTIME = 8     # "1h 23m" right-aligned
++    _COL_SPARK = 10     # sparkline chars
++
++    # Sum of all fixed columns: accent(2) + num(3) + sep(1) + project(12) + branch(10)
++    # + status(1+8) + stale(5) + tool(1+12) + tcnt(4) + ecnt(3) + uptime(8) + sep(2) + sparkline(10)
++    _FIXED_PREFIX_WIDTH = 82
++
++    def _render_row(self) -> Text:
++        """Render the row as Rich Text with fixed-width columns."""
++        text = Text()
++        agent = self.agent
++
++        symbol, label, color = STATUS_DISPLAY[agent.status]
++
++        # Animated symbol for WORKING: braille spinner (same width as ">>>")
++        if agent.status == AgentStatus.WORKING:
++            spinner_char = BRAILLE_SPINNER[self._anim_frame % len(BRAILLE_SPINNER)]
++            symbol = f" {spinner_char} "
++
++        # Col 1: Left accent (2 chars)
++        if agent.status == AgentStatus.WAITING_PERMISSION:
++            perm_style = f"bold {RED}" if (self._anim_frame // 2) % 2 == 0 else f"dim {RED}"
++            text.append("\u2503 ", style=perm_style)
++        elif agent.status == AgentStatus.WAITING_ANSWER:
++            text.append("\u2503 ", style=f"bold {YELLOW}")
++        elif agent.status == AgentStatus.ERROR:
++            text.append("\u2503 ", style=f"bold {PINK}")
++        else:
++            text.append("  ", style=f"{GREY}")
++
++        # Col 2: Row number or action letter (3 chars)
++        if self._action:
++            letter_style = f"bold {GREEN}" if self._action_focused else f"bold {CYAN}"
++            text.append(f"[{self._action.letter}]", style=letter_style)
++        else:
++            display_num = self._row_num if self._row_num <= 9 else 0
++            text.append(f" {display_num} ", style=f"{GREY}")
++
++        text.append(" ", style=f"{GREY}")
++
++        # Col 3: Project name (fixed 12 chars)
++        project = agent.project_name or agent.session_id[:12]
++        if agent.subagent_count > 0:
++            project = f"{project} [{agent.subagent_count}s]"
++        text.append(f"{project:<{self._COL_PROJECT}s}"[:self._COL_PROJECT], style="bold white")
++
++        # Col 3b: Git branch (fixed 10 chars)
++        branch = agent.git_branch or ""
++        if branch:
++            branch_display = branch[:self._COL_BRANCH - 1]
++            if agent.git_dirty_count > 0:
++                # Truncate one more to fit the '*'
++                branch_display = branch[:self._COL_BRANCH - 2] + "*"
++            text.append(
++                f"{branch_display:<{self._COL_BRANCH}s}"[:self._COL_BRANCH],
++                style=f"bold {CYAN}" if agent.git_dirty_count == 0 else f"bold {YELLOW}",
++            )
++        else:
++            text.append(" " * self._COL_BRANCH, style=f"{GREY}")
++
++        # Col 4: Status badge (fixed 8 chars: ">>> WORK", "[!] PERM")
++        status_str = f"{symbol} {label:<4s}"
++        text.append(f" {status_str:<{self._COL_STATUS}s}", style=f"bold {color}")
++
++        # Col 4b: Stale indicator (fixed 5 chars) — only for WORKING status
++        stale_str = ""
++        if agent.status == AgentStatus.WORKING and agent.last_event_time:
++            try:
++                last_t = datetime.fromisoformat(agent.last_event_time.replace("Z", "+00:00"))
++                age_s = (datetime.now(timezone.utc) - last_t).total_seconds()
++                if age_s > 120:
++                    mins = int(age_s) // 60
++                    secs = int(age_s) % 60
++                    stale_str = f"{mins}m{secs:02d}"[:5]
++                    text.append(f"{stale_str:<5s}", style=f"bold {RED}")
++                elif age_s > 30:
++                    stale_str = f"{int(age_s)}s"
++                    text.append(f"{stale_str:<5s}", style=f"bold {YELLOW}")
++                else:
++                    text.append(" " * self._COL_STALE, style=f"{GREY}")
++            except (ValueError, TypeError):
++                text.append(" " * self._COL_STALE, style=f"{GREY}")
++        else:
++            text.append(" " * self._COL_STALE, style=f"{GREY}")
++
++        # Col 5: Last tool (fixed 12 chars)
++        tool = (agent.last_tool or "-")[:self._COL_TOOL]
++        text.append(f" {tool:<{self._COL_TOOL}s}", style="white")
++
++        # Col 6: Tool count (right-aligned 4 chars)
++        text.append(f"{agent.tool_count:>{self._COL_TCNT}d}", style=f"{GREY}")
++
++        # Col 7: Error count (right-aligned 3 chars)
++        ecnt = f"{agent.error_count:>{self._COL_ECNT}d}"
++        if agent.error_count > 0:
++            text.append(ecnt, style=f"bold {PINK}")
++        else:
++            text.append(ecnt, style=f"{GREY}")
++
++        # Col 8: Uptime (right-aligned 8 chars)
++        text.append(f"{agent.uptime:>{self._COL_UPTIME}s}", style=f"{GREY}")
++
++        # Col 9: Sparkline (10 chars)
++        text.append("  ", style=f"{GREY}")
++        sparkline = self._render_sparkline(agent.activity_history)
++        text.append_text(sparkline)
++
++        # Col 10: Notification message + action hints (width-aware)
++        content_width = (getattr(self.size, "width", 120) or 120) - 2  # padding: 0 1
++        remaining = content_width - self._FIXED_PREFIX_WIDTH
++
++        # Determine action hint width: "[y][n]" = 6, "[->]" = 4, plus 2 separator each
++        hint_width = 0
++        if self._action:
++            hint_width = 8 if self._action.actionable else 6  # 2 sep + content
++
++        msg = agent.notification_message or ""
++        if remaining > hint_width and msg:
++            msg_budget = remaining - hint_width - 2  # 2 for "  " separator before msg
++            if msg_budget > 0:
++                if len(msg) > msg_budget:
++                    msg = msg[: max(msg_budget - 1, 0)] + "\u2026"
++                text.append(f"  {msg}", style="dim italic")
++
++        if self._action and remaining >= hint_width:
++            text.append("  ", style=f"{GREY}")
++            if self._action.actionable:
++                text.append("[y]", style=f"bold {GREEN}")
++                text.append("[n]", style=f"bold {RED}")
++            else:
++                text.append("[->]", style=f"bold {CYAN}")
++
++        # Focused action expansion
++        if self._action_focused and self._action and self._action.actionable:
++            summary = self._action.summary or ""
++            text.append(f'\n  "{summary}"', style="italic")
++            text.append("\n  >>> ", style=f"bold {GREEN}")
++            text.append("[y]", style=f"bold reverse {GREEN}")
++            text.append(" APPROVE  ", style=f"{GREY}")
++            text.append("[n]", style=f"bold reverse {RED}")
++            text.append(" DENY  ", style=f"{GREY}")
++            text.append("[Esc]", style=f"bold {CYAN}")
++            text.append(" cancel", style=f"{GREY}")
++
++        # Dim the entire row for unreachable agents (different terminal, not tmux)
++        if self._dim:
++            for i in range(len(text._spans)):
++                text._spans[i] = text._spans[i]._replace(style=f"bold {GREY}")
++
++        return text
++
++    @staticmethod
++    def _render_sparkline(history: list[int]) -> Text:
++        """Render activity history as a 10-char sparkline."""
++        recent = history[-10:] if len(history) >= 10 else history
++        if not recent or max(recent) == 0:
++            return Text("\u2581" * 10, style=f"bold {GREY}")
++        max_val = max(recent)
++        chars = []
++        for v in recent:
++            idx = min(int(v / max(max_val, 1) * 7), 7)
++            chars.append(SPARKLINE_CHARS[idx])
++        # Pad to 10 chars
++        while len(chars) < 10:
++            chars.insert(0, SPARKLINE_CHARS[0])
++        return Text("".join(chars), style=CYAN)
++
++
++class SessionList(ListView):
++    """ListView-based session list replacing AgentTable.
++
++    Provides the same public API as AgentTable so the app can use it
++    as a drop-in replacement.  Also supports inline action display.
++
++    Agents are grouped by terminal emulator.  The local terminal's
++    group appears first, then tmux, then other terminals alphabetically.
++    Separator rows (``GroupSeparator``) are inserted between groups.
++    Agents in unreachable terminals (not local, not tmux) are dimmed.
++    """
++
++    DEFAULT_CSS = """
++    SessionList {
++        height: 1fr;
++        min-height: 8;
++        scrollbar-size: 1 1;
++    }
++    """
++
++    class AgentHighlighted(Message):
++        """Posted when the cursor moves to a new agent."""
++
++        def __init__(self, agent: AgentState) -> None:
++            self.agent = agent
++            super().__init__()
++
++    def __init__(self, **kwargs) -> None:
++        super().__init__(**kwargs)
++        self._agents: list[AgentState] = []
++        self._action_map: dict[str, ActionItem] = {}  # session_id -> ActionItem
++        self._focused_letter: str | None = None
++        # Mapping: child index → agent index (None for separators)
++        self._child_to_agent: list[int | None] = []
++        # Ordered agent list after grouping (used for external access)
++        self._ordered_agents: list[AgentState] = []
++        # Dim flags per ordered agent index
++        self._dim_flags: list[bool] = []
++        # Local terminal label (resolved once)
++        self._local_terminal: str = get_terminal_label()
++        # Whether the backend can map PIDs to tabs (False for Ghostty)
++        self._backend_can_resolve: bool = self._check_backend_resolve()
++
++    @staticmethod
++    def _check_backend_resolve() -> bool:
++        """Check if the active terminal backend can map PIDs to tabs."""
++        from clorch.terminal import get_backend
++        backend = get_backend()
++        return getattr(backend, "can_resolve_tabs", lambda: False)()
++
++    def _is_group_reachable(self, group: str) -> bool:
++        """Check if agents in a given terminal group are reachable.
++
++        - Same terminal as us → reachable.
++        - tmux → always reachable (via tmux select-window).
++        - Unknown (no term_program) → reachable only if our backend
++          can resolve tabs (iTerm/Terminal.app can, Ghostty cannot).
++        - Known different terminal → not reachable.
++        """
++        if group == self._local_terminal or group == "tmux":
++            return True
++        if group == "unknown":
++            return self._backend_can_resolve
++        return False
++
++    def _group_agents(self, agents: list[AgentState]) -> tuple[
++        list[AgentState], list[int | None], list[bool], list[tuple[int, str]]
++    ]:
++        """Sort agents into terminal groups and compute child mapping.
++
++        Returns:
++            ordered_agents: agents in grouped + alphabetical order
++            child_to_agent: mapping from child index to agent index (None for separators)
++            dim_flags: whether each agent should be dimmed
++            separators: list of (child_index, label) for separator insertion
++        """
++        local = self._local_terminal
++
++        # Group agents by terminal
++        groups: dict[str, list[AgentState]] = {}
++        for agent in agents:
++            group = _agent_terminal_group(agent)
++            groups.setdefault(group, []).append(agent)
++
++        # Sort each group alphabetically by project name
++        for g in groups.values():
++            g.sort(key=lambda a: a.project_name.lower())
++
++        # Sort groups: local first, tmux second, then others alphabetically
++        sorted_groups = sorted(groups.keys(), key=lambda g: _group_sort_key(g, local))
++
++        ordered: list[AgentState] = []
++        child_map: list[int | None] = []
++        dim_flags: list[bool] = []
++        separators: list[tuple[int, str]] = []
++
++        # Only show separators when there are multiple groups
++        show_separators = len(sorted_groups) > 1
++
++        child_idx = 0
++        for group in sorted_groups:
++            group_agents = groups[group]
++            if show_separators:
++                label = group if group else "unknown"
++                if group == local:
++                    label = f"{label} (local)"
++                separators.append((child_idx, label))
++                child_map.append(None)
++                child_idx += 1
++
++            reachable = self._is_group_reachable(group)
++            for agent in group_agents:
++                agent_idx = len(ordered)
++                ordered.append(agent)
++                dim_flags.append(not reachable)
++                child_map.append(agent_idx)
++                child_idx += 1
++
++        return ordered, child_map, dim_flags, separators
++
++    def update_agents(self, agents: list[AgentState]) -> None:
++        """Refresh the list with grouped terminal sorting.
++
++        Agents are grouped by terminal, with separator headers between groups.
++        Updates existing rows in-place when possible to avoid flicker.
++        """
++        ordered, child_map, dim_flags, separators = self._group_agents(agents)
++
++        new_ids = [a.session_id for a in ordered]
++        old_ids = [a.session_id for a in self._ordered_agents]
++
++        if new_ids == old_ids and len(child_map) == len(self._child_to_agent):
++            # Same agents in same order — update in-place (no flicker)
++            self._agents = agents
++            self._ordered_agents = ordered
++            self._child_to_agent = child_map
++            self._dim_flags = dim_flags
++            agent_num = 0
++            for child in self.children:
++                if isinstance(child, SessionRow):
++                    agent = ordered[agent_num]
++                    agent_num += 1
++                    row_num = agent_num  # 1-based
++                    child.update_row(agent, row_num, dim=dim_flags[agent_num - 1])
++                    action = self._action_map.get(agent.session_id)
++                    child.set_action(action)
++                    if action and self._focused_letter and action.letter == self._focused_letter:
++                        child.set_action_focused(True)
++                    else:
++                        child.set_action_focused(False)
++            return
++
++        # Agent set or grouping changed — full rebuild
++        prev_id: str | None = None
++        if self._ordered_agents and self.index is not None:
++            prev_agent = self.get_selected_agent()
++            if prev_agent:
++                prev_id = prev_agent.session_id
++
++        self._agents = agents
++        self._ordered_agents = ordered
++        self._child_to_agent = child_map
++        self._dim_flags = dim_flags
++
++        self.clear()
++        sep_iter = iter(separators)
++        next_sep = next(sep_iter, None)
++        agent_num = 0
++        for child_idx, agent_idx in enumerate(child_map):
++            if agent_idx is None:
++                # Separator row
++                if next_sep and next_sep[0] == child_idx:
++                    self.append(GroupSeparator(next_sep[1]))
++                    next_sep = next(sep_iter, None)
++            else:
++                agent = ordered[agent_idx]
++                agent_num += 1
++                dim = dim_flags[agent_idx]
++                row = SessionRow(agent, agent_num, dim=dim)
++                action = self._action_map.get(agent.session_id)
++                if action:
++                    row.set_action(action)
++                    if self._focused_letter and action.letter == self._focused_letter:
++                        row.set_action_focused(True)
++                self.append(row)
++
++        # Restore cursor position by session_id, skipping separators.
++        new_child_index = self._first_agent_child_index()
++        if prev_id is not None:
++            for ci, ai in enumerate(child_map):
++                if ai is not None and ordered[ai].session_id == prev_id:
++                    new_child_index = ci
++                    break
++        if ordered and new_child_index is not None:
++            self.call_after_refresh(setattr, self, "index", new_child_index)
++
++    def _first_agent_child_index(self) -> int | None:
++        """Return the child index of the first actual agent row."""
++        for ci, ai in enumerate(self._child_to_agent):
++            if ai is not None:
++                return ci
++        return None
++
++    def update_actions(self, items: list[ActionItem]) -> None:
++        """Update the action map and refresh inline action display."""
++        self._action_map = {item.agent.session_id: item for item in items}
++        # Update existing rows with action info
++        for child in self.children:
++            if isinstance(child, SessionRow):
++                action = self._action_map.get(child.agent.session_id)
++                child.set_action(action)
++                if action and self._focused_letter and action.letter == self._focused_letter:
++                    child.set_action_focused(True)
++                else:
++                    child.set_action_focused(False)
++
++    def set_action_focus(self, letter: str) -> None:
++        """Focus an action by its letter — expands the matching row."""
++        self._focused_letter = letter
++        for child in self.children:
++            if isinstance(child, SessionRow) and child._action:
++                child.set_action_focused(child._action.letter == letter)
++
++    def clear_action_focus(self) -> None:
++        """Clear the focused action on all rows."""
++        self._focused_letter = None
++        for child in self.children:
++            if isinstance(child, SessionRow):
++                child.set_action_focused(False)
++
++    def get_selected_agent(self) -> AgentState | None:
++        """Get the currently highlighted agent (skipping separators)."""
++        if self.index is not None and 0 <= self.index < len(self._child_to_agent):
++            agent_idx = self._child_to_agent[self.index]
++            if agent_idx is not None and agent_idx < len(self._ordered_agents):
++                return self._ordered_agents[agent_idx]
++        return None
++
++    def get_agent_by_number(self, num: int) -> AgentState | None:
++        """Get an agent by its 1-based display number.
++
++        Number keys: 1-9 map to rows 1-9, 0 maps to row 10.
++        Returns None if the number is out of range.
++        """
++        if num == 0:
++            num = 10
++        idx = num - 1
++        if 0 <= idx < len(self._ordered_agents):
++            return self._ordered_agents[idx]
++        return None
++
++    def move_cursor(self, row: int) -> None:
++        """Move the cursor to the child index for the given agent index.
++
++        Accounts for separator rows when translating agent index to
++        child index.
++        """
++        # Find the child index for this agent index
++        for ci, ai in enumerate(self._child_to_agent):
++            if ai == row:
++                self.index = ci
++                return
++
++    def move_cursor_to_agent(self, session_id: str) -> None:
++        """Move the cursor to the child row for a given session_id."""
++        for ci, ai in enumerate(self._child_to_agent):
++            if ai is not None and self._ordered_agents[ai].session_id == session_id:
++                self.index = ci
++                return
++
++    def tick_animation(self, frame: int) -> None:
++        """Advance the animation frame on all rows."""
++        for child in self.children:
++            if isinstance(child, SessionRow):
++                child.set_anim_frame(frame)
++
++    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
++        """Post an AgentHighlighted message when the cursor moves."""
++        agent = self.get_selected_agent()
++        if agent:
++            self.post_message(self.AgentHighlighted(agent))
++
++    def is_agent_reachable(self, agent: AgentState) -> bool:
++        """Check if an agent is reachable from the current terminal.
++
++        Uses the same logic as grouping: local and tmux are always
++        reachable; unknown agents are reachable only when the backend
++        supports PID-to-tab mapping (iTerm yes, Ghostty no).
++        """
++        return self._is_group_reachable(_agent_terminal_group(agent))
+--- /tmp/clorch/src/clorch/tui/widgets/header_bar.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/header_bar.py	2026-02-27 08:29:07
+@@ -0,0 +1,116 @@
++"""Styled header bar with Unicode separators, tmux session name, and counts."""
++from __future__ import annotations
++
++import time
++
++from textual.widgets import Static
++from rich.text import Text
++
++from clorch.state.models import StatusSummary
++from clorch.constants import GREEN, RED, YELLOW, PINK, GREY, CYAN, BRAILLE_SPINNER
++
++
++class HeaderBar(Static):
++    """1-line header: CLORCH --- tmux:session --- counts --- N agents."""
++
++    DEFAULT_CSS = """
++    HeaderBar {
++        height: 1;
++        padding: 0 1;
++        text-style: bold;
++    }
++    """
++
++    def __init__(self, **kwargs) -> None:
++        super().__init__(Text(" CLORCH", style=f"bold {GREEN}"), **kwargs)
++        self._tmux_session: str = ""
++        self._anim_frame: int = 0
++        self._summary: StatusSummary | None = None
++        self._yolo: bool = False
++        # tools/min tracking
++        self._prev_total_tools: int = 0
++        self._prev_time: float = time.monotonic()
++        self._tools_per_min: float = 0.0
++
++    def set_tmux_session(self, name: str) -> None:
++        """Set the tmux session name for display."""
++        self._tmux_session = name
++
++    def set_yolo(self, enabled: bool) -> None:
++        """Toggle the YOLO badge display."""
++        self._yolo = enabled
++        self._refresh_display()
++
++    def tick_animation(self, frame: int) -> None:
++        """Advance animation frame and re-render if there are working agents."""
++        self._anim_frame = frame
++        if self._summary and (self._summary.working > 0 or self._yolo):
++            self._refresh_display()
++
++    def update_summary(self, summary: StatusSummary) -> None:
++        self._summary = summary
++        # Compute tools/min delta rate
++        now = time.monotonic()
++        elapsed = now - self._prev_time
++        if elapsed >= 3.0:  # Update rate every 3+ seconds to avoid jitter
++            delta_tools = summary.total_tools - self._prev_total_tools
++            if delta_tools >= 0:
++                self._tools_per_min = delta_tools / elapsed * 60.0
++            self._prev_total_tools = summary.total_tools
++            self._prev_time = now
++        self._refresh_display()
++
++    def _refresh_display(self) -> None:
++        summary = self._summary
++        if summary is None:
++            return
++        text = Text()
++
++        # Branding
++        text.append(" CLORCH", style=f"bold {GREEN}")
++        if self._yolo:
++            # Blinking warning badge — alternates every 2 frames
++            if self._anim_frame % 4 < 2:
++                text.append(" \u26a0 YOLO ", style=f"bold white on {RED}")
++            else:
++                text.append(" \u26a0 YOLO ", style=f"bold {RED}")
++        text.append(" \u2500\u2500\u2500 ", style=f"{GREY}")
++
++        # tmux session name (if available)
++        if self._tmux_session:
++            text.append(self._tmux_session, style=f"{CYAN}")
++            text.append(" \u2500\u2500\u2500 ", style=f"{GREY}")
++
++        # Status counts — full words
++        if summary.working > 0:
++            spinner = BRAILLE_SPINNER[self._anim_frame % len(BRAILLE_SPINNER)]
++            text.append(f"{spinner} ", style=f"bold {GREEN}")
++        text.append("Working: ", style=f"{GREY}")
++        text.append(str(summary.working), style=f"bold {GREEN}")
++        text.append(" \u2502 ", style=f"{GREY}")
++
++        text.append("Idle: ", style=f"{GREY}")
++        text.append(str(summary.idle), style=f"{GREY}")
++        text.append(" \u2502 ", style=f"{GREY}")
++
++        text.append("Perm: ", style=f"{GREY}")
++        text.append(str(summary.waiting_permission), style=f"bold {RED}")
++        text.append(" \u2502 ", style=f"{GREY}")
++
++        text.append("Ask: ", style=f"{GREY}")
++        text.append(str(summary.waiting_answer), style=f"bold {YELLOW}")
++        text.append(" \u2502 ", style=f"{GREY}")
++
++        text.append("Errors: ", style=f"{GREY}")
++        text.append(str(summary.error), style=f"bold {PINK}")
++
++        # tools/min rate
++        if self._tools_per_min >= 1.0:
++            text.append(" \u2502 ", style=f"{GREY}")
++            text.append(f"{int(self._tools_per_min)} t/m", style=f"{GREY}")
++
++        # Agent total
++        text.append(" \u2500\u2500\u2500 ", style=f"{GREY}")
++        text.append(f"{summary.total} agents", style=f"bold {CYAN}")
++
++        self.update(text)
+--- /tmp/clorch/src/clorch/tui/widgets/agent_detail.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/agent_detail.py	2026-02-27 08:30:48
+@@ -0,0 +1,209 @@
++"""Agent detail panel — bottom panel showing agent info or PERM details."""
++from __future__ import annotations
++
++from datetime import datetime, timezone
++
++from textual.widgets import Static
++from rich.text import Text
++
++from clorch.state.models import AgentState
++from clorch.constants import (
++    AgentStatus, STATUS_DISPLAY, SPARKLINE_CHARS,
++    CYAN, GREEN, GREY, PINK, RED, YELLOW,
++)
++
++# Label column width for alignment
++_LABEL_W = 12
++
++
++class AgentDetail(Static):
++    """Shows detailed information about the selected agent.
++
++    When the agent is WAITING_PERMISSION and has a tool_request_summary,
++    renders a special PERM view with syntax-highlighted request details.
++    Otherwise renders the normal key-value detail view.
++    """
++
++    DEFAULT_CSS = """
++    AgentDetail {
++        height: auto;
++        max-height: 10;
++        padding: 0 1;
++    }
++    """
++
++    def __init__(self, **kwargs) -> None:
++        super().__init__("", **kwargs)
++        self._agent: AgentState | None = None
++
++    def show_agent(self, agent: AgentState | None) -> None:
++        self._agent = agent
++        if agent is None:
++            self.update("")
++            return
++
++        if (
++            agent.status == AgentStatus.WAITING_PERMISSION
++            and agent.tool_request_summary
++        ):
++            self._render_perm_view(agent)
++        else:
++            self._render_normal_view(agent)
++
++    def _render_perm_view(self, agent: AgentState) -> None:
++        """Render PERM request detail with syntax highlighting."""
++        text = Text()
++
++        # Header: [!] PERM  project_name  ToolName
++        text.append("[!] PERM", style=f"bold {RED}")
++        text.append("  ", style=f"{GREY}")
++        text.append(agent.project_name or agent.session_id[:12], style="bold white")
++        text.append("  ", style=f"{GREY}")
++        text.append(agent.last_tool or "?", style=f"bold {YELLOW}")
++        text.append("\n")
++
++        # Body: summary with syntax highlighting
++        summary = agent.tool_request_summary or ""
++        for line in summary.split("\n")[:6]:  # cap to 6 lines
++            if line.startswith("$ "):
++                text.append(line, style=f"bold {GREEN}")
++            elif line.startswith("- "):
++                text.append(line, style=RED)
++            elif line.startswith("+ "):
++                text.append(line, style=GREEN)
++            elif line.startswith("/") or line.startswith("~"):
++                text.append(line, style=CYAN)
++            else:
++                text.append(line, style="white")
++            text.append("\n")
++
++        # Footer: action hints
++        text.append("[y]", style=f"bold reverse {GREEN}")
++        text.append(" APPROVE  ", style=f"{GREY}")
++        text.append("[n]", style=f"bold reverse {RED}")
++        text.append(" DENY  ", style=f"{GREY}")
++        text.append("[->]", style=f"bold {CYAN}")
++        text.append(" jump", style=f"{GREY}")
++
++        self.update(text)
++
++    def _render_normal_view(self, agent: AgentState) -> None:
++        """Render normal key-value detail view."""
++        symbol, label, color = STATUS_DISPLAY[agent.status]
++
++        text = Text()
++
++        # Project name
++        text.append(agent.project_name or agent.session_id[:12], style="bold white")
++        text.append("\n")
++
++        # Status + Uptime
++        text.append(f"{'Status':<{_LABEL_W}s}", style=f"{GREY}")
++        text.append(f"{symbol} {label}", style=f"bold {color}")
++        text.append("    ", style=f"{GREY}")
++        text.append(f"{'Uptime':<8s}", style=f"{GREY}")
++        text.append(f"{agent.uptime}", style="white")
++        text.append("\n")
++
++        # Path
++        if agent.cwd:
++            # Shorten home directory
++            path = agent.cwd.replace("/Users/", "~/", 1)
++            if path.startswith("~/"):
++                # Further shorten: ~/username/... -> ~/...
++                parts = path.split("/", 2)
++                if len(parts) >= 3:
++                    path = "~/" + parts[2]
++            text.append(f"{'Path':<{_LABEL_W}s}", style=f"{GREY}")
++            text.append(f"{path}", style=GREEN)
++            text.append("\n")
++
++        # Git info
++        if agent.git_branch:
++            text.append(f"{'Git':<{_LABEL_W}s}", style=f"{GREY}")
++            text.append(agent.git_branch, style=f"bold {CYAN}")
++            if agent.git_dirty_count > 0:
++                text.append(f" ({agent.git_dirty_count} dirty)", style=f"bold {YELLOW}")
++            else:
++                text.append(" \u2713", style=f"dim {GREEN}")
++            text.append("\n")
++
++        # Last event age
++        if agent.last_event_time:
++            try:
++                last_t = datetime.fromisoformat(agent.last_event_time.replace("Z", "+00:00"))
++                age_s = (datetime.now(timezone.utc) - last_t).total_seconds()
++                text.append(f"{'Last event':<{_LABEL_W}s}", style=f"{GREY}")
++                if age_s > 120:
++                    mins = int(age_s) // 60
++                    secs = int(age_s) % 60
++                    text.append(f"{mins}m{secs:02d}s ago", style=f"bold {RED}")
++                elif age_s > 30:
++                    text.append(f"{int(age_s)}s ago", style=f"bold {YELLOW}")
++                else:
++                    text.append(f"{int(age_s)}s ago", style=GREEN)
++                text.append("\n")
++            except (ValueError, TypeError):
++                pass
++
++        # Model + Last tool
++        text.append(f"{'Model':<{_LABEL_W}s}", style=f"{GREY}")
++        text.append(f"{agent.model or '-'}", style=CYAN)
++        if agent.last_tool:
++            text.append("    ", style=f"{GREY}")
++            text.append(f"{'Last tool':<10s}", style=f"{GREY}")
++            text.append(f"{agent.last_tool}", style="white")
++        text.append("\n")
++
++        # Counts line: Tools, Errors, Subagents, Compacts, Tasks
++        text.append(f"{'Tools':<{_LABEL_W}s}", style=f"{GREY}")
++        text.append(f"{agent.tool_count}", style="white")
++        text.append("    ", style=f"{GREY}")
++        text.append("Errors ", style=f"{GREY}")
++        text.append(
++            f"{agent.error_count}",
++            style=f"bold {PINK}" if agent.error_count else f"dim {GREY}",
++        )
++        if agent.subagent_count:
++            text.append("    ", style=f"{GREY}")
++            text.append("Subs ", style=f"{GREY}")
++            text.append(f"{agent.subagent_count}", style=CYAN)
++        if agent.compact_count:
++            text.append("    ", style=f"{GREY}")
++            text.append("Compacts ", style=f"{GREY}")
++            text.append(f"{agent.compact_count}", style=PINK)
++        if agent.task_completed_count:
++            text.append("    ", style=f"{GREY}")
++            text.append("Tasks ", style=f"{GREY}")
++            text.append(f"{agent.task_completed_count}", style=GREEN)
++        text.append("\n")
++
++        # Extended sparkline (use all available history, up to 20 chars)
++        text.append(f"{'Activity':<{_LABEL_W}s}", style=f"{GREY}")
++        sparkline = self._render_extended_sparkline(agent.activity_history)
++        text.append_text(sparkline)
++        text.append("\n")
++
++        # Notification message
++        if agent.notification_message:
++            text.append(f"{'Msg':<{_LABEL_W}s}", style=f"{GREY}")
++            msg = agent.notification_message
++            if len(msg) > 80:
++                msg = msg[:78] + ".."
++            text.append(f'"{msg}"', style=f"italic {YELLOW}")
++
++        self.update(text)
++
++    @staticmethod
++    def _render_extended_sparkline(history: list[int]) -> Text:
++        """Render an extended sparkline (up to 20 chars)."""
++        # Use up to 20 most recent data points
++        recent = history[-20:] if len(history) >= 20 else history
++        if not recent or max(recent) == 0:
++            return Text("\u2581" * min(len(recent), 20), style=f"{GREY}")
++        max_val = max(recent)
++        chars = []
++        for v in recent:
++            idx = min(int(v / max(max_val, 1) * 7), 7)
++            chars.append(SPARKLINE_CHARS[idx])
++        return Text("".join(chars), style=CYAN)
+--- /tmp/clorch/src/clorch/tui/widgets/status_bar.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/status_bar.py	2026-02-27 08:30:55
+@@ -0,0 +1,44 @@
++"""Status summary bar — replaces AsciiHeader + old StatusBar.
++
++Left: "CLAUDE ORCH" branding. Right: W/I/[!]/[?]/E counts + "N agents".
++"""
++from __future__ import annotations
++
++from textual.widgets import Static
++from rich.text import Text
++
++from clorch.state.models import StatusSummary
++from clorch.constants import GREEN, RED, YELLOW, PINK, GREY, CYAN
++
++
++class StatusBar(Static):
++    """Compact status bar: branding left, aggregate counts right."""
++
++    DEFAULT_CSS = """
++    StatusBar {
++        height: 1;
++        padding: 0 2;
++        text-style: bold;
++    }
++    """
++
++    def update_summary(self, summary: StatusSummary) -> None:
++        text = Text()
++        # Left: branding
++        text.append("CLAUDE ORCH", style=f"bold {GREEN}")
++        text.append("  ", style=f"{GREY}")
++
++        # Right: counts
++        text.append("W:", style=f"{GREY}")
++        text.append(str(summary.working), style=f"bold {GREEN}")
++        text.append("  I:", style=f"{GREY}")
++        text.append(str(summary.idle), style=f"{GREY}")
++        text.append("  [!]:", style=f"{GREY}")
++        text.append(str(summary.waiting_permission), style=f"bold {RED}")
++        text.append("  [?]:", style=f"{GREY}")
++        text.append(str(summary.waiting_answer), style=f"bold {YELLOW}")
++        text.append("  E:", style=f"{GREY}")
++        text.append(str(summary.error), style=f"bold {PINK}")
++        text.append("    ", style=f"{GREY}")
++        text.append(f"{summary.total} agents", style=f"bold {CYAN}")
++        self.update(text)
+--- /tmp/clorch/src/clorch/tui/widgets/settings_panel.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/settings_panel.py	2026-02-27 08:54:05
+@@ -0,0 +1,78 @@
++"""Settings panel — toggle controls for TUI preferences."""
++from __future__ import annotations
++
++from textual.widgets import Static
++from rich.text import Text
++
++from clorch.constants import CYAN, GREEN, GREY, RED, DIM
++
++
++class SettingsPanel(Static):
++    """Compact settings panel with toggle controls."""
++
++    DEFAULT_CSS = """
++    SettingsPanel {
++        height: auto;
++        max-height: 6;
++        padding: 0 1;
++    }
++    """
++
++    def __init__(self, **kwargs) -> None:
++        super().__init__("", **kwargs)
++        self._sound_enabled = False
++        self._yolo_enabled = False
++        self._rules_count = 0
++
++    @property
++    def sound_enabled(self) -> bool:
++        return self._sound_enabled
++
++    @property
++    def yolo_enabled(self) -> bool:
++        return self._yolo_enabled
++
++    def set_yolo(self, enabled: bool) -> None:
++        """Set YOLO state and re-render."""
++        self._yolo_enabled = enabled
++        self._refresh_content()
++
++    def set_rules_count(self, count: int) -> None:
++        """Set the number of loaded rules and re-render."""
++        self._rules_count = count
++        self._refresh_content()
++
++    def toggle_sound(self) -> bool:
++        """Toggle sound and re-render. Returns new state."""
++        self._sound_enabled = not self._sound_enabled
++        self._refresh_content()
++        return self._sound_enabled
++
++    def on_mount(self) -> None:
++        self._refresh_content()
++
++    def _refresh_content(self) -> None:
++        text = Text()
++
++        # Line 1: Sound
++        text.append("[s]", style=f"bold {CYAN}")
++        text.append(" Sound ", style="white")
++        if self._sound_enabled:
++            text.append("ON", style=f"bold {GREEN}")
++        else:
++            text.append("OFF", style=f"{GREY}")
++
++        # Line 2: YOLO — always red background (danger zone)
++        text.append("\n")
++        if self._yolo_enabled:
++            text.append("[!] \u26a0 YOLO ARMED \u26a0 ", style=f"bold white on {RED}")
++            if self._rules_count > 0:
++                text.append(f" ({self._rules_count} deny rules)", style=f"{GREY}")
++        else:
++            text.append("[!]", style=f"bold {CYAN}")
++            text.append(" YOLO ", style="white")
++            text.append("OFF", style=f"{GREY}")
++            if self._rules_count > 0:
++                text.append(f" ({self._rules_count} rules)", style=f"{GREY}")
++
++        self.update(text)
+--- /tmp/clorch/src/clorch/tui/widgets/telemetry_panel.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/telemetry_panel.py	2026-02-27 08:54:15
+@@ -0,0 +1,82 @@
++"""Telemetry panel — per-agent context gauge + activity sparkline."""
++from __future__ import annotations
++
++from textual.widgets import Static
++from rich.text import Text
++
++from clorch.state.models import AgentState
++from clorch.constants import SPARKLINE_CHARS, TELEMETRY_HISTORY_LEN, CYAN, GREEN, GREY, RED, YELLOW
++
++
++# Gauge bar width
++_GAUGE_W = 8
++# Sparkline width
++_SPARKLINE_W = 15
++# Agent name column width
++_NAME_W = 12
++
++
++class TelemetryPanel(Static):
++    """Displays gauge bars and sparklines for all agents."""
++
++    def __init__(self, **kwargs) -> None:
++        super().__init__("", **kwargs)
++
++    def update_agents(
++        self,
++        agents: list[AgentState],
++        selected_id: str | None,
++        history_map: dict[str, list[int]],
++    ) -> None:
++        if not agents:
++            self.update("")
++            return
++
++        text = Text()
++        for i, agent in enumerate(agents):
++            if i > 0:
++                text.append("\n")
++
++            # Agent name (highlighted if selected)
++            name = (agent.project_name or agent.session_id[:_NAME_W])[:_NAME_W]
++            is_selected = agent.session_id == selected_id
++            name_style = "bold white" if is_selected else f"{GREY}"
++            text.append(f"{name:<{_NAME_W}s}", style=name_style)
++            text.append(" ")
++
++            # Gauge bar from compact_count: 0=empty, 5+=full
++            cc = agent.compact_count
++            filled = min(cc, _GAUGE_W)
++            if cc <= 1:
++                bar_color = GREEN
++            elif cc <= 3:
++                bar_color = YELLOW
++            else:
++                bar_color = RED
++
++            bar = "\u2588" * filled + "\u2591" * (_GAUGE_W - filled)
++            text.append("[", style=f"{GREY}")
++            text.append(bar, style=bar_color)
++            text.append("]", style=f"{GREY}")
++            text.append(f" {cc}c", style=f"{GREY}")
++            text.append("  ")
++
++            # Sparkline from extended history
++            hist = history_map.get(agent.session_id, [])
++            recent = hist[-_SPARKLINE_W:] if len(hist) >= _SPARKLINE_W else hist
++            if not recent or max(recent) == 0:
++                spark = "\u2581" * min(len(recent) or 1, _SPARKLINE_W)
++                text.append(spark, style=f"{GREY}")
++            else:
++                max_val = max(recent)
++                chars = []
++                for v in recent:
++                    idx = min(int(v / max(max_val, 1) * 7), 7)
++                    chars.append(SPARKLINE_CHARS[idx])
++                text.append("".join(chars), style=CYAN)
++
++            # Warning icon at 4+ compacts
++            if cc >= 4:
++                text.append(" \u26a0", style=f"bold {RED}")
++
++        self.update(text)
+--- /tmp/clorch/src/clorch/tui/widgets/context_footer.py	1969-12-31 18:00:00
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/context_footer.py	2026-02-27 08:30:55
+@@ -0,0 +1,88 @@
++"""Context-sensitive footer showing relevant keybindings."""
++from __future__ import annotations
++
++from textual.widgets import Static
++from rich.text import Text
++
++from clorch.constants import CYAN, GREEN, GREY, PINK, RED
++
++
++class ContextFooter(Static):
++    """Shows different keybindings depending on current state.
++
++    Three tiers:
++    - "default"  — no actions pending
++    - "actions"  — actions pending, select with letter keys
++    - "approval" — action selected, y/n/Esc prompt
++    """
++
++    DEFAULT_CSS = """
++    ContextFooter {
++        height: 1;
++        color: #666666;
++        padding: 0 1;
++    }
++    """
++
++    def __init__(self, **kwargs) -> None:
++        super().__init__("", **kwargs)
++        self._mode = "default"
++
++    def set_mode(self, mode: str) -> None:
++        """Switch footer mode: 'default', 'actions', or 'approval'."""
++        if mode == self._mode:
++            return
++        self._mode = mode
++        self._render_footer()
++
++    @property
++    def mode(self) -> str:
++        return self._mode
++
++    def _render_footer(self) -> None:
++        text = Text()
++
++        if self._mode == "approval":
++            # Tier 3: action selected — only approval keys
++            text.append(" >>> ", style=f"bold {GREEN}")
++            text.append("[y]", style=f"bold {GREEN}")
++            text.append(" APPROVE  ", style=f"{GREY}")
++            text.append("[n]", style=f"bold {RED}")
++            text.append(" DENY  ", style=f"{GREY}")
++            text.append("[Esc]", style=f"bold {CYAN}")
++            text.append(" cancel", style=f"{GREY}")
++
++        elif self._mode == "actions":
++            # Tier 2: actions pending — action keys prominent
++            text.append(" [a-z]", style=f"bold {CYAN}")
++            text.append("select action ", style=f"{GREY}")
++            text.append("[Y]", style=f"bold {GREEN}")
++            text.append("approve all ", style=f"{GREY}")
++            text.append("│ ", style=f"{GREY}")
++            text.append("[j/k]", style=f"bold {CYAN}")
++            text.append("nav ", style=f"{GREY}")
++            text.append("[->]", style=f"bold {CYAN}")
++            text.append("jump ", style=f"{GREY}")
++            text.append("[?]", style=f"bold {CYAN}")
++            text.append("help ", style=f"{GREY}")
++            text.append("[q]", style=f"bold {CYAN}")
++            text.append("uit", style=f"{GREY}")
++
++        else:
++            # Tier 1: default — navigation keys
++            text.append(" [j/k]", style=f"bold {CYAN}")
++            text.append("navigate ", style=f"{GREY}")
++            text.append("[1-0]", style=f"bold {CYAN}")
++            text.append("select ", style=f"{GREY}")
++            text.append("[->]", style=f"bold {CYAN}")
++            text.append("jump ", style=f"{GREY}")
++            text.append("[d]", style=f"bold {CYAN}")
++            text.append("detail ", style=f"{GREY}")
++            text.append("[!]", style=f"bold {CYAN}")
++            text.append("yolo ", style=f"{GREY}")
++            text.append("[?]", style=f"bold {CYAN}")
++            text.append("help ", style=f"{GREY}")
++            text.append("[q]", style=f"bold {CYAN}")
++            text.append("uit", style=f"{GREY}")
++
++        self.update(text)

@@ -181,6 +181,10 @@ info "Initializing clorch hooks..."
 clorch init
 success "clorch hooks initialized"
 
+info "Applying catppuccin theme to clorch..."
+"$DOTFILES_DIR/patches/apply-clorch-theme.sh"
+success "clorch themed"
+
 # ── 8. Bootstrap neovim plugins ────────────────────────────
 info "Neovim will auto-install plugins on first launch (lazy.nvim)"
 success "Plugins will be installed when you first run nvim"
