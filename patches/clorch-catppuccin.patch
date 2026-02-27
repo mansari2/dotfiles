@@ -142,7 +142,7 @@ diff -ruN --ex clorch/terminal/detect.py /Users/azeemansarils/.local/pipx/venvs/
  
 diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py
 --- clorch/tui/app.py	2026-02-27 08:59:30
-+++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 08:58:43
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/app.py	2026-02-27 09:28:21
 @@ -170,6 +170,7 @@
          Binding("k", "cursor_up", "Up", show=False),
          Binding("right", "jump_to_agent", "Jump", show=False),
@@ -188,7 +188,7 @@ diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/l
          # Dead process check — remove stale state file immediately
          if agent.pid and not pid_alive(agent.pid):
              state_file = self._manager._state_dir / f"{agent.session_id}.json"
-@@ -729,7 +723,51 @@
+@@ -729,7 +723,67 @@
              self.notify(f"Jumped to {name}")
              return
  
@@ -232,11 +232,27 @@ diff -ruN --ex clorch/tui/app.py /Users/azeemansarils/.local/pipx/venvs/clorch/l
 +                    self.notify(f"Opened {session_name} in new iTerm window")
 +                return
 +
-+        # Determine where the agent is running for a helpful message
++        # Fallback for iTerm agents: try multiple strategies to find the tab
 +        from clorch.tui.widgets.session_list import _agent_terminal_group
++        from clorch.terminal import get_backend
 +        terminal = _agent_terminal_group(agent)
 +        if terminal and terminal != "tmux":
-+            self.notify(f"{name} is running in {terminal} — switch there manually", severity="information")
++            backend = get_backend()
++            # Try multiple search terms to find the right iTerm tab
++            search_terms = [name]
++            if agent.cwd:
++                import os
++                search_terms.append(os.path.basename(agent.cwd))
++            search_terms.extend(["claude", "Claude"])
++
++            for term in search_terms:
++                if backend.activate_by_name(term):
++                    self.notify(f"Jumped to {name}")
++                    return
++
++            # Last resort: just bring iTerm to front
++            backend.bring_to_front()
++            self.notify(f"Opened iTerm — {name} is in one of the tabs", severity="information")
 +        elif not agent.pid:
              self.notify(f"{name}: no PID — restart session", severity="warning")
          else:
@@ -482,8 +498,28 @@ diff -ruN --ex clorch/tui/widgets/agent_detail.py /Users/azeemansarils/.local/pi
          for v in recent:
 diff -ruN --ex clorch/tui/widgets/context_footer.py /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/context_footer.py
 --- clorch/tui/widgets/context_footer.py	2026-02-27 08:59:30
-+++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/context_footer.py	2026-02-27 08:30:55
-@@ -58,7 +58,7 @@
++++ /Users/azeemansarils/.local/pipx/venvs/clorch/lib/python3.14/site-packages/clorch/tui/widgets/context_footer.py	2026-02-27 09:29:53
+@@ -19,7 +19,7 @@
+     DEFAULT_CSS = """
+     ContextFooter {
+         height: 1;
+-        color: #666666;
++        color: #9399b2;
+         padding: 0 1;
+     }
+     """
+@@ -28,6 +28,10 @@
+         super().__init__("", **kwargs)
+         self._mode = "default"
+ 
++    def on_mount(self) -> None:
++        """Render footer on mount so it's visible immediately."""
++        self._render_footer()
++
+     def set_mode(self, mode: str) -> None:
+         """Switch footer mode: 'default', 'actions', or 'approval'."""
+         if mode == self._mode:
+@@ -58,7 +62,7 @@
              text.append("select action ", style=f"{GREY}")
              text.append("[Y]", style=f"bold {GREEN}")
              text.append("approve all ", style=f"{GREY}")
