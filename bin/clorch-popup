@@ -1,9 +1,11 @@
 #!/bin/bash
-# Clorch dashboard — keybinding hints shown at bottom
+# Clorch dashboard with keybinding footer
 
-clorch
+# Run clorch with LESS pager to enable footer
+CLORCH_PAGER="less -R +G" clorch
 
-# Show help footer
-printf '\n\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-printf '\033[38;5;245m%s\033[0m\n' " q/Esc: Close │ j/k: Navigate │ y/n: Approve/Deny │ s: Sound │ t: Jump"
-printf '\033[38;5;244m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Show keybinding hints in bright text at bottom
+printf '\n'
+printf '\033[38;5;117m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+printf '\033[38;5;117m%s\033[0m\n' " q/Esc: Close  │  j/k/↑/↓: Navigate  │  y/n: Approve/Deny  │  s: Sound  │  t: Jump to Window  │  ?: Help"
+printf '\033[38;5;117m%s\033[0m\n' "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
